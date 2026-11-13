@@ -1,0 +1,65 @@
+
+  .   ____          _            __ _ _
+ /\\ / ___'_ __ _ _(_)_ __  __ _ \ \ \ \
+( ( )\___ | '_ | '_| | '_ \/ _` | \ \ \ \
+ \\/  ___)| |_)| | | | | || (_| |  ) ) ) )
+  '  |____| .__|_| |_|_| |_\__, | / / / /
+ =========|_|==============|___/=/_/_/_/
+
+ :: Spring Boot ::                (v3.4.5)
+
+2026-11-13T13:30:50.679+07:00  INFO 22696 --- [dental-backend] [           main] c.chia.dental.DentalBackendApplication   : Starting DentalBackendApplication v0.1.0-SNAPSHOT using Java 24.0.2 with PID 22696 (C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\target\dental-backend-0.1.0-SNAPSHOT.jar started by adminn in C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend)
+2026-11-13T13:30:50.694+07:00  INFO 22696 --- [dental-backend] [           main] c.chia.dental.DentalBackendApplication   : No active profile set, falling back to 1 default profile: "default"
+2026-11-13T13:30:53.467+07:00  INFO 22696 --- [dental-backend] [           main] .s.d.r.c.RepositoryConfigurationDelegate : Bootstrapping Spring Data JPA repositories in DEFAULT mode.
+2026-11-13T13:30:53.704+07:00  INFO 22696 --- [dental-backend] [           main] .s.d.r.c.RepositoryConfigurationDelegate : Finished Spring Data repository scanning in 188 ms. Found 11 JPA repository interfaces.
+2026-11-13T13:30:55.488+07:00  INFO 22696 --- [dental-backend] [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat initialized with port 8080 (http)
+2026-11-13T13:30:55.534+07:00  INFO 22696 --- [dental-backend] [           main] o.apache.catalina.core.StandardService   : Starting service [Tomcat]
+2026-11-13T13:30:55.535+07:00  INFO 22696 --- [dental-backend] [           main] o.apache.catalina.core.StandardEngine    : Starting Servlet engine: [Apache Tomcat/10.1.40]
+2026-11-13T13:30:55.641+07:00  INFO 22696 --- [dental-backend] [           main] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring embedded WebApplicationContext
+2026-11-13T13:30:55.643+07:00  INFO 22696 --- [dental-backend] [           main] w.s.c.ServletWebServerApplicationContext : Root WebApplicationContext: initialization completed in 4769 ms
+2026-11-13T13:30:56.188+07:00  INFO 22696 --- [dental-backend] [           main] o.hibernate.jpa.internal.util.LogHelper  : HHH000204: Processing PersistenceUnitInfo [name: default]
+2026-11-13T13:30:56.380+07:00  INFO 22696 --- [dental-backend] [           main] org.hibernate.Version                    : HHH000412: Hibernate ORM core version 6.6.13.Final
+2026-11-13T13:30:56.518+07:00  INFO 22696 --- [dental-backend] [           main] o.h.c.internal.RegionFactoryInitiator    : HHH000026: Second-level cache disabled
+2026-11-13T13:30:57.552+07:00  INFO 22696 --- [dental-backend] [           main] o.s.o.j.p.SpringPersistenceUnitInfo      : No LoadTimeWeaver setup: ignoring JPA class transformer
+2026-11-13T13:30:57.664+07:00  INFO 22696 --- [dental-backend] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Starting...
+2026-11-13T13:30:58.389+07:00  INFO 22696 --- [dental-backend] [           main] com.zaxxer.hikari.pool.HikariPool        : HikariPool-1 - Added connection org.postgresql.jdbc.PgConnection@56872fcb
+2026-11-13T13:30:58.392+07:00  INFO 22696 --- [dental-backend] [           main] com.zaxxer.hikari.HikariDataSource       : HikariPool-1 - Start completed.
+2026-11-13T13:30:58.601+07:00  INFO 22696 --- [dental-backend] [           main] org.hibernate.orm.connections.pooling    : HHH10001005: Database info:
+	Database JDBC URL [Connecting through datasource 'HikariDataSource (HikariPool-1)']
+	Database driver: undefined/unknown
+	Database version: 18.7
+	Autocommit mode: undefined/unknown
+	Isolation level: undefined/unknown
+	Minimum pool size: undefined/unknown
+	Maximum pool size: undefined/unknown
+2026-11-13T13:31:01.602+07:00  INFO 22696 --- [dental-backend] [           main] o.h.e.t.j.p.i.JtaPlatformInitiator       : HHH000489: No JTA platform available (set 'hibernate.transaction.jta.platform' to enable JTA platform integration)
+2026-11-13T13:31:01.754+07:00  INFO 22696 --- [dental-backend] [           main] j.LocalContainerEntityManagerFactoryBean : Initialized JPA EntityManagerFactory for persistence unit 'default'
+2026-11-13T13:31:03.168+07:00  INFO 22696 --- [dental-backend] [           main] o.s.d.j.r.query.QueryEnhancerFactory     : Hibernate is in classpath; If applicable, HQL parser will be used.
+2026-11-13T13:31:05.607+07:00  WARN 22696 --- [dental-backend] [           main] JpaBaseConfiguration$JpaWebConfiguration : spring.jpa.open-in-view is enabled by default. Therefore, database queries may be performed during view rendering. Explicitly configure spring.jpa.open-in-view to disable this warning
+2026-11-13T13:31:05.667+07:00  WARN 22696 --- [dental-backend] [           main] .s.s.UserDetailsServiceAutoConfiguration : 
+
+Using generated security password: b4b48275-2fa4-486f-99aa-546be4c51845
+
+This generated password is for development use only. Your security configuration must be updated before running your application in production.
+
+2026-11-13T13:31:05.696+07:00  INFO 22696 --- [dental-backend] [           main] r$InitializeUserDetailsManagerConfigurer : Global AuthenticationManager configured with UserDetailsService bean with name inMemoryUserDetailsManager
+2026-11-13T13:31:07.299+07:00  INFO 22696 --- [dental-backend] [           main] o.s.b.w.embedded.tomcat.TomcatWebServer  : Tomcat started on port 8080 (http) with context path '/'
+2026-11-13T13:31:07.325+07:00  INFO 22696 --- [dental-backend] [           main] c.chia.dental.DentalBackendApplication   : Started DentalBackendApplication in 17.885 seconds (process running for 19.254)
+2026-11-13T13:31:09.498+07:00  INFO 22696 --- [dental-backend] [nio-8080-exec-1] o.a.c.c.C.[Tomcat].[localhost].[/]       : Initializing Spring DispatcherServlet 'dispatcherServlet'
+2026-11-13T13:31:09.500+07:00  INFO 22696 --- [dental-backend] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Initializing Servlet 'dispatcherServlet'
+2026-11-13T13:31:09.505+07:00  INFO 22696 --- [dental-backend] [nio-8080-exec-1] o.s.web.servlet.DispatcherServlet        : Completed initialization in 3 ms
+Hibernate: 
+    select
+        se1_0.service_id,
+        se1_0.care_scenario_id,
+        se1_0.duration,
+        se1_0.followup_cycle_days,
+        se1_0.is_active,
+        se1_0.name,
+        se1_0.price 
+    from
+        service se1_0 
+    where
+        se1_0.is_active 
+    order by
+        se1_0.service_id
