@@ -9,5 +9,6 @@ import java.util.Optional;
 public interface PatientProfileRepository extends JpaRepository<PatientProfile, Long> {
     List<PatientProfile> findByCustomerCustomerId(Long customerId);
     Optional<PatientProfile> findByPatientIdAndCustomerCustomerId(Long patientId, Long customerId);
+    boolean existsByCustomerPhoneAndFullNameIgnoreCaseAndBirthYear(String phone, String fullName, Short birthYear);
+    boolean existsByCustomerPhone(String phone);
 }
-

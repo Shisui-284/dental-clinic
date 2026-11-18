@@ -1,5 +1,8 @@
 package com.chia.dental.booking;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import jakarta.validation.Valid;
 import jakarta.validation.constraints.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -13,9 +16,36 @@ import java.util.List;
 public class AppointmentDtos {
 
     @Data
-    public static class CreateAppointmentRequest {
-        private Long patientId; // Nếu null -> tạo hồ sơ bệnh nhân mới theo thông tin bên dưới
+    public static class PatientInfoDto {
+        @NotBlank(message = "Họ tên bệnh nhân không được để trống")
+        @Size(max = 100)
+        private String fullName;
 
+        @NotNull(message = "Năm sinh không được để trống")
+        @Min(value = 1900, message = "Năm sinh không hợp lệ")
+        @Max(value = 2100, message = "Năm sinh không hợp lệ")
+        private Short birthYear;
+
+        @Pattern(regexp = "^(MALE|FEMALE|OTHER)$", message = "Giới tính phải là MALE, FEMALE hoặc OTHER")
+        private String gender;
+
+        @Size(max = 30)
+        private String relation;
+
+        private Boolean isGuardian = false;
+    }
+
+    @Data
+    public static class CreateAppointmentRequest {
+        @Pattern(regexp = "^(SELF|RELATIVE)$", message = "bookingFor phải là SELF hoặc RELATIVE")
+        private String bookingFor = "SELF";
+
+        private Long patientId; // Nếu null -> tạo hồ sơ bệnh nhân mới theo patientInfo hoặc patientFullName/birthYear
+
+        @Valid
+        private PatientInfoDto patientInfo;
+
+        // Giữ tương thích ngược 6.3
         private String patientFullName;
 
         @Min(value = 1900, message = "Năm sinh không hợp lệ")
@@ -25,8 +55,9 @@ public class AppointmentDtos {
         @Pattern(regexp = "^(MALE|FEMALE|OTHER)$", message = "Giới tính phải là MALE, FEMALE hoặc OTHER")
         private String gender;
 
-        @NotNull(message = "Vui lòng chọn bác sĩ")
-        private Long doctorId;
+        // Tùy chọn: nếu null -> hệ thống tự động phân bổ bác sĩ ít lịch nhất (5.3.8 mục 1)
+        @JsonAlias("doctorId")
+        private Long staffId;
 
         private Long chairId; // Tùy chọn: nếu null hệ thống tự chọn ghế trống
 
@@ -41,9 +72,22 @@ public class AppointmentDtos {
     }
 
     @Data
+    public static class CustomerRescheduleRequest {
+        @NotNull(message = "Vui lòng chọn ngày giờ hẹn mới")
+        private OffsetDateTime dateTime;
+
+        @JsonAlias("doctorId")
+        private Long staffId; // Tùy chọn: đổi bác sĩ hoặc để trống giữ nguyên/tự phân bổ
+
+        @Size(max = 500, message = "Ghi chú tối đa 500 ký tự")
+        private String note;
+    }
+
+    @Data
     public static class ConfirmAppointmentRequest {
-        private Long doctorId; // Tùy chọn đổi bác sĩ khi duyệt
-        private Long chairId;  // Tùy chọn đổi ghế khi duyệt
+        @JsonAlias("doctorId")
+        private Long staffId; // Tùy chọn chốt/đổi bác sĩ khi duyệt
+        private Long chairId; // Tùy chọn chốt/đổi ghế khi duyệt
     }
 
     @Data
@@ -68,24 +112,30 @@ public class AppointmentDtos {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public static class AppointmentResponse {
         private Long appointmentId;
+        private String appointmentCode;
         private Long patientId;
         private String patientName;
         private String bookedByPhone;
         private Long doctorId;
         private String doctorName;
+        private Boolean doctorAutoAssigned;
         private Long chairId;
         private String chairName;
         private OffsetDateTime dateTime;
         private Short duration;
         private OffsetDateTime endTime;
         private String status;
+        private String statusLabel;
         private String source;
         private OffsetDateTime holdUntil;
+        private Boolean canModify;
+        private Boolean isPriority;
+        private String cancelReason;
         private String note;
         private OffsetDateTime createdAt;
         private List<ServiceItemDto> services;
     }
 }
-

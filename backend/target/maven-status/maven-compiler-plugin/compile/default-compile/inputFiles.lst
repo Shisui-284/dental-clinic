@@ -1,43 +1,50 @@
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\auth\AuthController.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\auth\AuthDtos.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\auth\AuthService.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\booking\AppointmentBookingService.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\booking\AppointmentDtos.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\booking\CustomerAppointmentController.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\booking\PublicCatalogService.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\booking\PublicController.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\booking\PublicDtos.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\booking\StaffAppointmentController.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\common\exception\BusinessException.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\common\exception\GlobalExceptionHandler.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\common\response\ApiResponse.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\common\response\FieldErrorDetail.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\config\OpenApiConfig.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\config\SecurityConfig.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\DentalBackendApplication.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\entity\Appointment.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\entity\AppointmentServiceEntity.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\entity\ClinicHoliday.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\entity\Customer.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\entity\DentalChair.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\entity\DoctorLeave.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\entity\DoctorSchedule.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\entity\OtpRequest.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\entity\PatientProfile.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\entity\RolePermission.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\entity\ServiceEntity.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\entity\StaffAccount.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\repository\AppointmentRepository.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\repository\AppointmentServiceRepository.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\repository\ClinicHolidayRepository.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\repository\CustomerRepository.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\repository\DentalChairRepository.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\repository\DoctorLeaveRepository.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\repository\DoctorScheduleRepository.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\repository\OtpRequestRepository.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\repository\PatientProfileRepository.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\repository\ServiceRepository.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\repository\StaffAccountRepository.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\security\JwtAuthenticationFilter.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\security\JwtService.java
-C:\Users\adminn\Documents\Hệ thống đặt lịch cho nha khoa\backend\src\main\java\com\chia\dental\security\UserPrincipal.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\auth\AuthController.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\auth\AuthDtos.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\auth\AuthService.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\booking\AppointmentBookingService.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\booking\AppointmentDtos.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\booking\CustomerAppointmentController.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\booking\IcsCalendarService.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\booking\PublicCatalogService.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\booking\PublicController.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\booking\PublicDtos.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\booking\StaffAppointmentController.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\common\audit\AuditLogService.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\common\config\ClinicConfigService.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\common\exception\BusinessException.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\common\exception\GlobalExceptionHandler.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\common\response\ApiResponse.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\common\response\FieldErrorDetail.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\config\OpenApiConfig.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\config\SecurityConfig.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\DentalBackendApplication.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\entity\Appointment.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\entity\AppointmentServiceEntity.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\entity\ClinicConfig.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\entity\ClinicHoliday.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\entity\Consent.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\entity\Customer.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\entity\DentalChair.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\entity\DoctorLeave.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\entity\DoctorSchedule.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\entity\OtpRequest.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\entity\PatientProfile.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\entity\RolePermission.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\entity\ServiceEntity.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\entity\StaffAccount.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\repository\AppointmentRepository.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\repository\AppointmentServiceRepository.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\repository\ClinicConfigRepository.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\repository\ClinicHolidayRepository.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\repository\ConsentRepository.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\repository\CustomerRepository.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\repository\DentalChairRepository.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\repository\DoctorLeaveRepository.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\repository\DoctorScheduleRepository.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\repository\OtpRequestRepository.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\repository\PatientProfileRepository.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\repository\ServiceRepository.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\repository\StaffAccountRepository.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\security\JwtAuthenticationFilter.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\security\JwtService.java
+C:\Users\adminn\Documents\dental-clinic\backend\src\main\java\com\chia\dental\security\UserPrincipal.java

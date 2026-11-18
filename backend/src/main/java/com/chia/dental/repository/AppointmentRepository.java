@@ -7,8 +7,18 @@ import org.springframework.data.repository.query.Param;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Optional;
 
 public interface AppointmentRepository extends JpaRepository<Appointment, Long> {
+
+    @Query("""
+        SELECT a FROM Appointment a
+        JOIN FETCH a.patient p
+        JOIN FETCH a.staff s
+        JOIN FETCH a.chair c
+        WHERE a.appointmentId = :appointmentId
+    """)
+    Optional<Appointment> findByIdWithDetails(@Param("appointmentId") Long appointmentId);
 
     @Query("""
         SELECT a FROM Appointment a
@@ -32,6 +42,8 @@ public interface AppointmentRepository extends JpaRepository<Appointment, Long> 
 
     @Query("""
         SELECT a FROM Appointment a
+        JOIN FETCH a.staff s
+        JOIN FETCH a.chair c
         WHERE a.status IN ('PENDING', 'CONFIRMED', 'CHECKED_IN')
           AND a.dateTime >= :startOfDay
           AND a.dateTime < :endOfDay
@@ -39,5 +51,14 @@ public interface AppointmentRepository extends JpaRepository<Appointment, Long> 
     List<Appointment> findActiveAppointmentsInRange(
             @Param("startOfDay") OffsetDateTime startOfDay,
             @Param("endOfDay") OffsetDateTime endOfDay);
-}
 
+    @Query("""
+        SELECT a FROM Appointment a
+        JOIN FETCH a.staff s
+        WHERE a.patient.customer.customerId = :customerId
+          AND a.status IN ('COMPLETED', 'CONFIRMED', 'CHECKED_IN')
+          AND s.status = true
+        ORDER BY a.dateTime DESC
+    """)
+    List<Appointment> findRecentAppointmentsForDoctorSuggestion(@Param("customerId") Long customerId);
+}

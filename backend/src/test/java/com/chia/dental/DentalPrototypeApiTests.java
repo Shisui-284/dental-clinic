@@ -1,6 +1,9 @@
 package com.chia.dental;
 
-import com.fasterxml.jackson.databind.JsonNode;
+import com.chia.dental.entity.DoctorSchedule;
+import com.chia.dental.entity.StaffAccount;
+import com.chia.dental.repository.DoctorScheduleRepository;
+import com.chia.dental.repository.StaffAccountRepository;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -11,6 +14,12 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
+import java.time.LocalTime;
+import java.time.OffsetDateTime;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+
 import static org.hamcrest.Matchers.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
@@ -20,14 +29,39 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Transactional
 class DentalPrototypeApiTests {
 
+    private static final ZoneId CLINIC_ZONE = ZoneId.of("Asia/Ho_Chi_Minh");
+
     @Autowired
     private MockMvc mockMvc;
 
     @Autowired
     private ObjectMapper objectMapper;
 
+    @Autowired
+    private DoctorScheduleRepository doctorScheduleRepository;
+
+    @Autowired
+    private StaffAccountRepository staffAccountRepository;
+
+    private LocalDate prepareFutureWorkingDay(int plusDays) {
+        LocalDate date = LocalDate.now(CLINIC_ZONE).plusDays(plusDays);
+        if (doctorScheduleRepository.findByStaffStaffIdAndShiftDateAndStatus(4L, date, "ACTIVE").isEmpty()) {
+            StaffAccount doc = staffAccountRepository.findById(4L).orElseThrow();
+            doctorScheduleRepository.save(DoctorSchedule.builder()
+                    .staff(doc)
+                    .shiftDate(date)
+                    .startTime(LocalTime.of(8, 0))
+                    .endTime(LocalTime.of(17, 0))
+                    .status("ACTIVE")
+                    .build());
+        }
+        return date;
+    }
+
     @Test
     void testPublicCatalogAndAvailableSlots_HappyAndHolidayCases() throws Exception {
+        LocalDate workingDate = prepareFutureWorkingDay(4);
+
         // 1. Lấy danh sách dịch vụ
         mockMvc.perform(get("/api/v1/public/services"))
                 .andExpect(status().isOk())
@@ -40,9 +74,9 @@ class DentalPrototypeApiTests {
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.data", hasSize(3)));
 
-        // 3. Lấy slot trống ngày 2026-11-20 (có ca làm việc trong sample data)
+        // 3. Lấy slot trống vào ngày có ca làm việc
         mockMvc.perform(get("/api/v1/public/appointments/available-slots")
-                        .param("date", "2026-11-20")
+                        .param("date", workingDate.toString())
                         .param("serviceIds", "1"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.holiday").value(false))
@@ -59,6 +93,9 @@ class DentalPrototypeApiTests {
 
     @Test
     void testEndToEndBookingAndReceptionistConfirmFlow() throws Exception {
+        LocalDate workingDate = prepareFutureWorkingDay(5);
+        OffsetDateTime bookingTime = ZonedDateTime.of(workingDate, LocalTime.of(14, 0), CLINIC_ZONE).toOffsetDateTime();
+
         // 1. Khách hàng yêu cầu OTP
         MvcResult otpRes = mockMvc.perform(post("/api/v1/auth/otp/request")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -102,11 +139,11 @@ class DentalPrototypeApiTests {
                                 {
                                   "patientId": 1,
                                   "doctorId": 4,
-                                  "dateTime": "2026-11-20T09:00:00+07:00",
+                                  "dateTime": "%s",
                                   "serviceIds": [1],
                                   "note": "Test prototype booking"
                                 }
-                                """))
+                                """.formatted(bookingTime)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.data.status").value("PENDING"))
                 .andReturn();
@@ -149,4 +186,3 @@ class DentalPrototypeApiTests {
                 .andExpect(jsonPath("$.code").value("INVALID_STATUS_TRANSITION"));
     }
 }
-
