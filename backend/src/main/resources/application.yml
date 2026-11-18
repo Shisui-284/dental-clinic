@@ -31,6 +31,9 @@ app:
     max-retries: 5
     lock-minutes: 30
     prototype-expose-code: true # Chỉ bật ở môi trường prototype/dev để dễ test trên Swagger/Postman
+  scheduling:
+    enabled: true
+    hold-expiration-ms: 60000 # Quét lịch PENDING quá hạn hold_until mỗi 1 phút (5.3.6)
 
 springdoc:
   api-docs:

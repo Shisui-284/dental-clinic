@@ -6,6 +6,7 @@ import com.chia.dental.common.config.ClinicConfigService;
 import com.chia.dental.common.exception.BusinessException;
 import com.chia.dental.entity.*;
 import com.chia.dental.repository.*;
+import com.chia.dental.schedule.LeaveConflictService;
 import com.chia.dental.security.UserPrincipal;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
@@ -33,9 +34,15 @@ public class AppointmentBookingService {
     private final ClinicHolidayRepository clinicHolidayRepository;
     private final DoctorScheduleRepository doctorScheduleRepository;
     private final DoctorLeaveRepository doctorLeaveRepository;
+    private final NoShowEventRepository noShowEventRepository;
+    private final LeaveConflictService leaveConflictService;
     private final ClinicConfigService clinicConfigService;
     private final AuditLogService auditLogService;
     private final IcsCalendarService icsCalendarService;
+
+    // =========================================================================
+    // 1. CỔNG KHÁCH HÀNG (MÀN K5, K6, K7)
+    // =========================================================================
 
     @Transactional
     public AppointmentResponse createCustomerAppointment(UserPrincipal principal, CreateAppointmentRequest req) {
@@ -56,7 +63,7 @@ public class AppointmentBookingService {
             throw new BusinessException("CLINIC_HOLIDAY", "Ngày này phòng khám nghỉ lễ, không nhận đặt lịch.", HttpStatus.BAD_REQUEST);
         }
 
-        ResolvedPatient resolvedPatient = resolvePatientProfile(customer, req, now);
+        ResolvedPatient resolvedPatient = resolveCustomerPatientProfile(customer, req, now);
         PatientProfile patient = resolvedPatient.patient();
         boolean isNewPatient = resolvedPatient.isNewPatient();
 
@@ -75,7 +82,7 @@ public class AppointmentBookingService {
 
         validateWithinClinicHours(slotStart, slotEnd);
 
-        DoctorAssignment assignment = resolveDoctorForSlot(req.getStaffId(), slotStart, slotEnd, null);
+        DoctorAssignment assignment = resolveDoctorForSlot(req.getStaffId(), slotStart, slotEnd, null, true);
         StaffAccount doctor = assignment.doctor();
         boolean autoAssigned = assignment.autoAssigned();
 
@@ -126,7 +133,7 @@ public class AppointmentBookingService {
         auditLogService.logCustomer(customer.getCustomerId(), "APPOINTMENT_CREATE", "appointment",
                 appointment.getAppointmentId(), null, auditNew);
 
-        return toResponse(appointment, savedServices, false);
+        return toResponse(appointment, savedServices, false, false, null);
     }
 
     @Transactional(readOnly = true)
@@ -134,7 +141,7 @@ public class AppointmentBookingService {
         OffsetDateTime now = OffsetDateTime.now(CLINIC_ZONE);
         return appointmentRepository.findByCustomerId(principal.getId()).stream()
                 .filter(a -> matchesCustomerTab(a, tab, now))
-                .map(a -> toResponse(a, appointmentServiceRepository.findByAppointmentId(a.getAppointmentId()), false))
+                .map(a -> toResponse(a, appointmentServiceRepository.findByAppointmentId(a.getAppointmentId()), false, false, null))
                 .toList();
     }
 
@@ -178,12 +185,12 @@ public class AppointmentBookingService {
         Long requestedDoctorId = req.getStaffId();
         DoctorAssignment assignment;
         if (requestedDoctorId != null) {
-            assignment = resolveDoctorForSlot(requestedDoctorId, newStart, newEnd, appt.getAppointmentId());
+            assignment = resolveDoctorForSlot(requestedDoctorId, newStart, newEnd, appt.getAppointmentId(), true);
         } else {
             try {
-                assignment = resolveDoctorForSlot(appt.getStaff().getStaffId(), newStart, newEnd, appt.getAppointmentId());
+                assignment = resolveDoctorForSlot(appt.getStaff().getStaffId(), newStart, newEnd, appt.getAppointmentId(), true);
             } catch (BusinessException ex) {
-                assignment = resolveDoctorForSlot(null, newStart, newEnd, appt.getAppointmentId());
+                assignment = resolveDoctorForSlot(null, newStart, newEnd, appt.getAppointmentId(), true);
             }
         }
         DentalChair newChair = resolveAvailableChair(null, newStart, newEnd, appt.getAppointmentId());
@@ -210,7 +217,7 @@ public class AppointmentBookingService {
         auditLogService.logCustomer(principal.getId(), "APPOINTMENT_RESCHEDULE", "appointment",
                 appt.getAppointmentId(), oldSnapshot, newSnapshot);
 
-        return toResponse(appt, appointmentServiceRepository.findByAppointmentId(appt.getAppointmentId()), false);
+        return toResponse(appt, appointmentServiceRepository.findByAppointmentId(appt.getAppointmentId()), false, false, null);
     }
 
     @Transactional
@@ -249,7 +256,7 @@ public class AppointmentBookingService {
                 Map.of("status", "CANCELLED", "cancelledByType", "CUSTOMER", "cancelReason", appt.getCancelReason())
         );
 
-        return toResponse(appt, appointmentServiceRepository.findByAppointmentId(appt.getAppointmentId()), false);
+        return toResponse(appt, appointmentServiceRepository.findByAppointmentId(appt.getAppointmentId()), false, false, null);
     }
 
     @Transactional(readOnly = true)
@@ -265,16 +272,175 @@ public class AppointmentBookingService {
         return new IcsDownloadPayload("appointment-" + code + ".ics", content);
     }
 
+    // =========================================================================
+    // 2. CỔNG NHÂN SỰ / LỄ TÂN ĐIỀU PHỐI (MÀN L1, L2, L3)
+    // =========================================================================
+
     @Transactional(readOnly = true)
-    public List<AppointmentResponse> getStaffAppointments(String status) {
-        return appointmentRepository.findAllWithDetails(status).stream()
-                .map(a -> toResponse(a, appointmentServiceRepository.findByAppointmentId(a.getAppointmentId()), true))
+    public List<AppointmentResponse> getStaffAppointments(
+            LocalDate date,
+            String status,
+            Long staffId,
+            Long chairId,
+            Boolean onlyLeaveConflict) {
+
+        OffsetDateTime startOfDay = date != null
+                ? date.atStartOfDay(CLINIC_ZONE).toOffsetDateTime()
+                : OffsetDateTime.of(1970, 1, 1, 0, 0, 0, 0, ZoneOffset.UTC);
+        OffsetDateTime endOfDay = date != null
+                ? date.plusDays(1).atStartOfDay(CLINIC_ZONE).toOffsetDateTime()
+                : OffsetDateTime.of(2100, 1, 1, 0, 0, 0, 0, ZoneOffset.UTC);
+        String statusFilter = status != null ? status.trim() : "";
+        long staffFilter = staffId != null ? staffId : -1L;
+        long chairFilter = chairId != null ? chairId : -1L;
+        Set<Long> conflictIds = leaveConflictService.findConflictingAppointmentIds();
+
+        return appointmentRepository.searchStaffAppointments(statusFilter, staffFilter, chairFilter, startOfDay, endOfDay).stream()
+                .filter(a -> !Boolean.TRUE.equals(onlyLeaveConflict) || conflictIds.contains(a.getAppointmentId()))
+                .map(a -> toResponse(
+                        a,
+                        appointmentServiceRepository.findByAppointmentId(a.getAppointmentId()),
+                        true,
+                        conflictIds.contains(a.getAppointmentId()),
+                        null))
                 .toList();
     }
 
+    /**
+     * Lễ tân tạo lịch tại quầy (Màn L2 — UC-06, FR-06, FR-14):
+     * - PHONE / SOCIAL -> CONFIRMED ngay (bỏ qua Blacklist)
+     * - WALK_IN -> CHECKED_IN ngay (actual_arrival_at = now), hỗ trợ dịch vụ tạm (is_temporary = true, service_id = null)
+     * - Hỗ trợ lịch cấp cứu ưu tiên (is_priority = true)
+     */
     @Transactional
+    public AppointmentResponse createStaffAppointment(UserPrincipal principal, StaffCreateAppointmentRequest req) {
+        OffsetDateTime now = OffsetDateTime.now(CLINIC_ZONE);
+        StaffAccount creator = staffAccountRepository.findById(principal.getId())
+                .orElseThrow(() -> new BusinessException("STAFF_NOT_FOUND", "Không tìm thấy thông tin nhân sự.", HttpStatus.NOT_FOUND));
+
+        boolean isWalkIn = "WALK_IN".equals(req.getSource());
+        boolean isPriority = Boolean.TRUE.equals(req.getIsPriority());
+
+        OffsetDateTime slotStart = req.getDateTime() != null ? req.getDateTime() : (isWalkIn ? now : null);
+        if (slotStart == null) {
+            throw new BusinessException("DATETIME_REQUIRED", "Vui lòng chọn ngày giờ hẹn.", HttpStatus.BAD_REQUEST);
+        }
+
+        boolean hasOfficialServices = req.getServiceIds() != null && !req.getServiceIds().isEmpty();
+        boolean hasTempService = req.getTemporaryService() != null;
+        if (!hasOfficialServices && !hasTempService) {
+            throw new BusinessException("SERVICE_REQUIRED",
+                    "Vui lòng chọn ít nhất một dịch vụ hoặc nhập dịch vụ tạm (temporaryService).",
+                    HttpStatus.BAD_REQUEST);
+        }
+
+        // Lễ tân tạo hộ / vãng lai BỎ QUA kiểm tra Blacklist (BR Màn L2)
+        Customer customer = customerRepository.findByPhone(req.getPhone().trim())
+                .orElseGet(() -> customerRepository.save(Customer.builder()
+                        .phone(req.getPhone().trim())
+                        .isBlacklisted(false)
+                        .createdAt(now)
+                        .build()));
+
+        ResolvedPatient resolvedPatient = resolveStaffPatientProfile(customer, req);
+        PatientProfile patient = resolvedPatient.patient();
+        boolean isNewPatient = resolvedPatient.isNewPatient();
+
+        List<ServiceEntity> services = List.of();
+        int serviceDuration = 0;
+        if (hasOfficialServices) {
+            services = serviceRepository.findByServiceIdInAndIsActiveTrue(req.getServiceIds());
+            if (services.size() != new HashSet<>(req.getServiceIds()).size()) {
+                throw new BusinessException("SERVICE_NOT_FOUND", "Có dịch vụ không tồn tại hoặc đã ngừng cung cấp.", HttpStatus.BAD_REQUEST);
+            }
+            serviceDuration += services.stream().mapToInt(ServiceEntity::getDuration).sum();
+        }
+        if (hasTempService) {
+            serviceDuration += req.getTemporaryService().getDurationMinutes();
+        }
+
+        int chairBuffer = clinicConfigService.getChairBufferMinutes();
+        int newPatientBuffer = isNewPatient ? clinicConfigService.getNewPatientBufferMinutes() : 0;
+        short totalDuration = (short) (serviceDuration + chairBuffer + newPatientBuffer);
+        OffsetDateTime slotEnd = slotStart.plusMinutes(totalDuration);
+
+        // Với WALK_IN hoặc cấp cứu (is_priority = true) không ép buộc phải có doctor_schedule định sẵn
+        boolean requireShift = !(isWalkIn || isPriority);
+        DoctorAssignment assignment = resolveDoctorForSlot(req.getStaffId(), slotStart, slotEnd, null, requireShift);
+        DentalChair chair = resolveAvailableChair(req.getChairId(), slotStart, slotEnd, null);
+
+        String targetStatus = isWalkIn ? "CHECKED_IN" : "CONFIRMED";
+        String noteText = req.getNote();
+        if (hasTempService && req.getTemporaryService().getDescription() != null && !req.getTemporaryService().getDescription().isBlank()) {
+            String tempDesc = "[Dịch vụ tạm: " + req.getTemporaryService().getDescription().trim() + "]";
+            noteText = (noteText == null || noteText.isBlank()) ? tempDesc : noteText + " " + tempDesc;
+            if (noteText.length() > 500) {
+                noteText = noteText.substring(0, 500);
+            }
+        }
+
+        Appointment appointment = Appointment.builder()
+                .patient(patient)
+                .staff(assignment.doctor())
+                .chair(chair)
+                .dateTime(slotStart)
+                .duration(totalDuration)
+                .status(targetStatus)
+                .source(req.getSource())
+                .bookedByPhone(customer.getPhone())
+                .holdUntil(null)
+                .actualArrivalAt(isWalkIn ? now : null)
+                .isPriority(isPriority)
+                .note(noteText)
+                .createdAt(now)
+                .createdBy(creator)
+                .build();
+
+        appointment = appointmentRepository.saveAndFlush(appointment);
+
+        List<AppointmentServiceEntity> savedServices = new ArrayList<>();
+        for (ServiceEntity svc : services) {
+            savedServices.add(appointmentServiceRepository.save(AppointmentServiceEntity.builder()
+                    .appointment(appointment)
+                    .service(svc)
+                    .isTemporary(false)
+                    .durationSnapshot(svc.getDuration())
+                    .priceSnapshot(svc.getPrice())
+                    .isPerformed(false)
+                    .build()));
+        }
+        if (hasTempService) {
+            savedServices.add(appointmentServiceRepository.save(AppointmentServiceEntity.builder()
+                    .appointment(appointment)
+                    .service(null)
+                    .isTemporary(true)
+                    .durationSnapshot(req.getTemporaryService().getDurationMinutes())
+                    .priceSnapshot(null)
+                    .isPerformed(false)
+                    .build()));
+        }
+
+        Map<String, Object> auditNew = new LinkedHashMap<>();
+        auditNew.put("status", appointment.getStatus());
+        auditNew.put("source", appointment.getSource());
+        auditNew.put("isPriority", appointment.getIsPriority());
+        auditNew.put("dateTime", appointment.getDateTime().toString());
+        auditNew.put("staffId", assignment.doctor().getStaffId());
+        auditNew.put("chairId", chair.getChairId());
+        auditNew.put("hasTemporaryService", hasTempService);
+        auditLogService.logStaff(creator.getStaffId(), "APPOINTMENT_CREATE_STAFF", "appointment",
+                appointment.getAppointmentId(), null, auditNew);
+
+        return toResponse(appointment, savedServices, true, false, customer.getIsBlacklisted());
+    }
+
+    /**
+     * Lễ tân duyệt lịch PENDING -> CONFIRMED (Màn L1 — 5.3.5 mục 4a):
+     * Nếu quá hạn hold_until -> tự động chuyển CANCELLED (SYSTEM) và commit, sau đó trả 409 APPT_HOLD_EXPIRED.
+     */
+    @Transactional(noRollbackFor = BusinessException.class)
     public AppointmentResponse confirmAppointment(Long appointmentId, UserPrincipal principal, ConfirmAppointmentRequest req) {
-        Appointment appt = appointmentRepository.findById(appointmentId)
+        Appointment appt = appointmentRepository.findByIdWithDetails(appointmentId)
                 .orElseThrow(() -> new BusinessException("APPT_NOT_FOUND", "Không tìm thấy lịch hẹn #" + appointmentId, HttpStatus.NOT_FOUND));
 
         if (!"PENDING".equals(appt.getStatus())) {
@@ -285,8 +451,22 @@ public class AppointmentBookingService {
 
         OffsetDateTime now = OffsetDateTime.now(CLINIC_ZONE);
         if (appt.getHoldUntil() != null && appt.getHoldUntil().isBefore(now)) {
+            appt.setStatus("CANCELLED");
+            appt.setCancelledByType("SYSTEM");
+            appt.setCancelledBy(null);
+            appt.setCancelReason("Hết hạn giữ chỗ");
+            appointmentRepository.saveAndFlush(appt);
+
+            auditLogService.logSystem(
+                    "APPOINTMENT_AUTO_CANCEL",
+                    "appointment",
+                    appt.getAppointmentId(),
+                    Map.of("status", "PENDING", "holdUntil", appt.getHoldUntil().toString()),
+                    Map.of("status", "CANCELLED", "cancelledByType", "SYSTEM", "cancelReason", "Hết hạn giữ chỗ")
+            );
+
             throw new BusinessException("APPT_HOLD_EXPIRED",
-                    "Lịch chờ xác nhận đã quá hạn giữ chỗ (hold_until).",
+                    "Lịch chờ xác nhận đã quá hạn giữ chỗ (hold_until), hệ thống đã tự động chuyển sang CANCELLED.",
                     HttpStatus.CONFLICT);
         }
 
@@ -307,6 +487,11 @@ public class AppointmentBookingService {
         OffsetDateTime end = appt.getDateTime().plusMinutes(appt.getDuration());
         checkDoctorLeave(appt.getStaff().getStaffId(), appt.getDateTime(), end);
 
+        // Xóa cờ auto-assigned sau khi Lễ tân đã chốt bác sĩ & xác nhận
+        if (appt.getNote() != null && appt.getNote().contains(AUTO_ASSIGNED_TAG)) {
+            appt.setNote(buildStoredNote(appt.getNote(), false));
+        }
+
         appt.setStatus("CONFIRMED");
         appt = appointmentRepository.saveAndFlush(appt);
 
@@ -320,12 +505,96 @@ public class AppointmentBookingService {
         );
 
         List<AppointmentServiceEntity> services = appointmentServiceRepository.findByAppointmentId(appt.getAppointmentId());
-        return toResponse(appt, services, true);
+        return toResponse(appt, services, true, false, null);
+    }
+
+    /**
+     * Lễ tân đổi ngày giờ / bác sĩ / ghế tự do (Màn L3 — UC-08, UC-10, FR-10, FR-13).
+     */
+    @Transactional
+    public AppointmentResponse staffRescheduleAppointment(Long appointmentId, UserPrincipal principal, StaffRescheduleRequest req) {
+        Appointment appt = appointmentRepository.findByIdWithDetails(appointmentId)
+                .orElseThrow(() -> new BusinessException("APPT_NOT_FOUND", "Không tìm thấy lịch hẹn #" + appointmentId, HttpStatus.NOT_FOUND));
+
+        if (!"PENDING".equals(appt.getStatus()) && !"CONFIRMED".equals(appt.getStatus())) {
+            throw new BusinessException("INVALID_STATUS_TRANSITION",
+                    "Chỉ có thể đổi lịch ở trạng thái PENDING hoặc CONFIRMED (hiện tại: " + appt.getStatus() + ").",
+                    HttpStatus.BAD_REQUEST);
+        }
+
+        OffsetDateTime newStart = req.getDateTime();
+        OffsetDateTime newEnd = newStart.plusMinutes(appt.getDuration());
+
+        Map<String, Object> oldSnapshot = Map.of(
+                "dateTime", appt.getDateTime().toString(),
+                "staffId", appt.getStaff().getStaffId(),
+                "chairId", appt.getChair().getChairId(),
+                "status", appt.getStatus()
+        );
+
+        Long targetStaffId = req.getStaffId() != null ? req.getStaffId() : appt.getStaff().getStaffId();
+        DoctorAssignment assignment = resolveDoctorForSlot(targetStaffId, newStart, newEnd, appt.getAppointmentId(), false);
+        DentalChair targetChair = resolveAvailableChair(req.getChairId(), newStart, newEnd, appt.getAppointmentId());
+
+        appt.setDateTime(newStart);
+        appt.setStaff(assignment.doctor());
+        appt.setChair(targetChair);
+        if (req.getNote() != null) {
+            appt.setNote(req.getNote().trim().isEmpty() ? null : req.getNote().trim());
+        }
+        if ("PENDING".equals(appt.getStatus())) {
+            appt.setHoldUntil(calculateHoldUntil(OffsetDateTime.now(CLINIC_ZONE), newStart));
+        }
+
+        appt = appointmentRepository.saveAndFlush(appt);
+
+        Map<String, Object> newSnapshot = Map.of(
+                "dateTime", appt.getDateTime().toString(),
+                "staffId", appt.getStaff().getStaffId(),
+                "chairId", appt.getChair().getChairId(),
+                "status", appt.getStatus()
+        );
+        auditLogService.logStaff(principal.getId(), "APPOINTMENT_RESCHEDULE", "appointment",
+                appt.getAppointmentId(), oldSnapshot, newSnapshot);
+
+        boolean hasConflict = leaveConflictService.findConflictingAppointmentIds().contains(appt.getAppointmentId());
+        return toResponse(appt, appointmentServiceRepository.findByAppointmentId(appt.getAppointmentId()), true, hasConflict, null);
+    }
+
+    /**
+     * Lễ tân Check-in khách Đã đến (Màn L3 — UC-09, FR-11).
+     */
+    @Transactional
+    public AppointmentResponse checkInAppointment(Long appointmentId, UserPrincipal principal) {
+        Appointment appt = appointmentRepository.findByIdWithDetails(appointmentId)
+                .orElseThrow(() -> new BusinessException("APPT_NOT_FOUND", "Không tìm thấy lịch hẹn #" + appointmentId, HttpStatus.NOT_FOUND));
+
+        if (!"CONFIRMED".equals(appt.getStatus())) {
+            throw new BusinessException("INVALID_STATUS_TRANSITION",
+                    "Chỉ có thể Check-in lịch hẹn đang ở trạng thái CONFIRMED (hiện tại: " + appt.getStatus() + ").",
+                    HttpStatus.BAD_REQUEST);
+        }
+
+        OffsetDateTime now = OffsetDateTime.now(CLINIC_ZONE);
+        appt.setStatus("CHECKED_IN");
+        appt.setActualArrivalAt(now);
+        appt = appointmentRepository.saveAndFlush(appt);
+
+        auditLogService.logStaff(
+                principal.getId(),
+                "APPOINTMENT_CHECK_IN",
+                "appointment",
+                appt.getAppointmentId(),
+                Map.of("status", "CONFIRMED"),
+                Map.of("status", "CHECKED_IN", "actualArrivalAt", now.toString())
+        );
+
+        return toResponse(appt, appointmentServiceRepository.findByAppointmentId(appt.getAppointmentId()), true, false, null);
     }
 
     @Transactional
     public AppointmentResponse staffCancelAppointment(Long appointmentId, UserPrincipal principal, CancelAppointmentRequest req) {
-        Appointment appt = appointmentRepository.findById(appointmentId)
+        Appointment appt = appointmentRepository.findByIdWithDetails(appointmentId)
                 .orElseThrow(() -> new BusinessException("APPT_NOT_FOUND", "Không tìm thấy lịch hẹn #" + appointmentId, HttpStatus.NOT_FOUND));
 
         if ("COMPLETED".equals(appt.getStatus()) || "CANCELLED".equals(appt.getStatus())) {
@@ -339,7 +608,7 @@ public class AppointmentBookingService {
         appt.setStatus("CANCELLED");
         appt.setCancelledByType("STAFF");
         appt.setCancelledBy(staff);
-        appt.setCancelReason(req.getCancelReason());
+        appt.setCancelReason(req.getCancelReason().trim());
         appt = appointmentRepository.saveAndFlush(appt);
 
         auditLogService.logStaff(
@@ -351,8 +620,115 @@ public class AppointmentBookingService {
                 Map.of("status", "CANCELLED", "cancelledByType", "STAFF", "cancelReason", appt.getCancelReason())
         );
 
-        return toResponse(appt, appointmentServiceRepository.findByAppointmentId(appt.getAppointmentId()), true);
+        return toResponse(appt, appointmentServiceRepository.findByAppointmentId(appt.getAppointmentId()), true, false, null);
     }
+
+    /**
+     * Lễ tân đánh dấu Không đến (Màn L3 — UC-09, UC-11, FR-15):
+     * Ghi bản ghi no_show_event; Trigger trg_no_show_blacklist tự động cập nhật customer.is_blacklisted.
+     */
+    @Transactional
+    public AppointmentResponse markNoShow(Long appointmentId, UserPrincipal principal) {
+        Appointment appt = appointmentRepository.findByIdWithDetails(appointmentId)
+                .orElseThrow(() -> new BusinessException("APPT_NOT_FOUND", "Không tìm thấy lịch hẹn #" + appointmentId, HttpStatus.NOT_FOUND));
+
+        if (!"CONFIRMED".equals(appt.getStatus())) {
+            throw new BusinessException("INVALID_STATUS_TRANSITION",
+                    "Chỉ có thể đánh dấu Không đến cho lịch hẹn đang ở trạng thái CONFIRMED (hiện tại: " + appt.getStatus() + ").",
+                    HttpStatus.BAD_REQUEST);
+        }
+
+        OffsetDateTime now = OffsetDateTime.now(CLINIC_ZONE);
+        appt.setStatus("NO_SHOW");
+        appt = appointmentRepository.saveAndFlush(appt);
+
+        noShowEventRepository.saveAndFlush(NoShowEvent.builder()
+                .patient(appt.getPatient())
+                .appointment(appt)
+                .occurredAt(now)
+                .isReversed(false)
+                .build());
+
+        Long customerId = appt.getPatient().getCustomer().getCustomerId();
+        Boolean latestBlacklisted = customerRepository.findLatestBlacklistedStatus(customerId);
+
+        auditLogService.logStaff(
+                principal.getId(),
+                "APPOINTMENT_NO_SHOW",
+                "appointment",
+                appt.getAppointmentId(),
+                Map.of("status", "CONFIRMED"),
+                Map.of("status", "NO_SHOW", "customerBlacklisted", Boolean.TRUE.equals(latestBlacklisted))
+        );
+
+        return toResponse(appt, appointmentServiceRepository.findByAppointmentId(appt.getAppointmentId()), true, false, latestBlacklisted);
+    }
+
+    /**
+     * Lễ tân hoàn tác trạng thái Không đến trong cùng ngày khám (Màn L3 — 5.3.5 mục 4b):
+     * Cập nhật no_show_event.is_reversed = true (Trigger tự tính lại Blacklist), chuyển lịch sang CHECKED_IN.
+     */
+    @Transactional
+    public AppointmentResponse reverseNoShow(Long appointmentId, UserPrincipal principal, ReverseNoShowRequest req) {
+        Appointment appt = appointmentRepository.findByIdWithDetails(appointmentId)
+                .orElseThrow(() -> new BusinessException("APPT_NOT_FOUND", "Không tìm thấy lịch hẹn #" + appointmentId, HttpStatus.NOT_FOUND));
+
+        if (!"NO_SHOW".equals(appt.getStatus())) {
+            throw new BusinessException("INVALID_STATUS_TRANSITION",
+                    "Chỉ có thể hoàn tác cho lịch hẹn đang ở trạng thái NO_SHOW (hiện tại: " + appt.getStatus() + ").",
+                    HttpStatus.BAD_REQUEST);
+        }
+
+        OffsetDateTime now = OffsetDateTime.now(CLINIC_ZONE);
+        LocalDate apptDay = appt.getDateTime().atZoneSameInstant(CLINIC_ZONE).toLocalDate();
+        LocalDate today = now.toLocalDate();
+        if (!apptDay.equals(today)) {
+            throw new BusinessException("REVERSE_NO_SHOW_EXPIRED",
+                    "Chỉ được phép hoàn tác trạng thái Không đến trong cùng ngày khám (" + apptDay + ").",
+                    HttpStatus.UNPROCESSABLE_ENTITY);
+        }
+
+        StaffAccount staff = staffAccountRepository.findById(principal.getId())
+                .orElseThrow(() -> new BusinessException("STAFF_NOT_FOUND", "Không tìm thấy thông tin nhân sự.", HttpStatus.NOT_FOUND));
+
+        NoShowEvent event = noShowEventRepository.findByAppointmentAppointmentId(appointmentId)
+                .orElseThrow(() -> new BusinessException("NOSHOW_EVENT_NOT_FOUND",
+                        "Không tìm thấy bản ghi no_show_event cho lịch hẹn #" + appointmentId,
+                        HttpStatus.NOT_FOUND));
+
+        if (Boolean.TRUE.equals(event.getIsReversed())) {
+            throw new BusinessException("NOSHOW_ALREADY_REVERSED", "Sự kiện Không đến này đã được hoàn tác trước đó.", HttpStatus.BAD_REQUEST);
+        }
+
+        event.setIsReversed(true);
+        event.setReversedBy(staff);
+        event.setReversedAt(now);
+        event.setReversedReason(req.getReversedReason().trim());
+        noShowEventRepository.saveAndFlush(event);
+
+        appt.setStatus("CHECKED_IN");
+        appt.setActualArrivalAt(now);
+        appt = appointmentRepository.saveAndFlush(appt);
+
+        Long customerId = appt.getPatient().getCustomer().getCustomerId();
+        Boolean latestBlacklisted = customerRepository.findLatestBlacklistedStatus(customerId);
+
+        auditLogService.logStaff(
+                principal.getId(),
+                "APPOINTMENT_REVERSE_NO_SHOW",
+                "appointment",
+                appt.getAppointmentId(),
+                Map.of("status", "NO_SHOW"),
+                Map.of("status", "CHECKED_IN", "reversedReason", event.getReversedReason(),
+                        "customerBlacklisted", Boolean.TRUE.equals(latestBlacklisted))
+        );
+
+        return toResponse(appt, appointmentServiceRepository.findByAppointmentId(appt.getAppointmentId()), true, false, latestBlacklisted);
+    }
+
+    // =========================================================================
+    // 3. HELPER & BUSINESS RULES
+    // =========================================================================
 
     /**
      * Công thức tính Hold_Until theo mục 3.1.7, 5.2 và 5.3.5 (Mục 3):
@@ -469,7 +845,7 @@ public class AppointmentBookingService {
         return true;
     }
 
-    private ResolvedPatient resolvePatientProfile(Customer customer, CreateAppointmentRequest req, OffsetDateTime now) {
+    private ResolvedPatient resolveCustomerPatientProfile(Customer customer, CreateAppointmentRequest req, OffsetDateTime now) {
         if (req.getPatientId() != null) {
             PatientProfile existing = patientProfileRepository
                     .findByPatientIdAndCustomerCustomerId(req.getPatientId(), customer.getCustomerId())
@@ -482,6 +858,7 @@ public class AppointmentBookingService {
         String fullName = req.getPatientInfo() != null ? req.getPatientInfo().getFullName() : req.getPatientFullName();
         Short birthYear = req.getPatientInfo() != null ? req.getPatientInfo().getBirthYear() : req.getBirthYear();
         String gender = req.getPatientInfo() != null ? req.getPatientInfo().getGender() : req.getGender();
+        String address = req.getPatientInfo() != null ? req.getPatientInfo().getAddress() : null;
 
         if (fullName == null || fullName.isBlank() || birthYear == null) {
             throw new BusinessException("PATIENT_INFO_REQUIRED",
@@ -494,9 +871,9 @@ public class AppointmentBookingService {
                 .fullName(fullName.trim())
                 .birthYear(birthYear)
                 .gender(gender)
+                .address(address)
                 .build());
 
-        // Nếu đặt hộ cho người thân (Màn K2/K5 - 5.3.5 mục 3), ghi consent liên kết for_patient_id
         if ("RELATIVE".equalsIgnoreCase(req.getBookingFor()) || req.getPatientInfo() != null) {
             String relation = req.getPatientInfo() != null ? req.getPatientInfo().getRelation() : null;
             boolean isGuardian = req.getPatientInfo() != null && Boolean.TRUE.equals(req.getPatientInfo().getIsGuardian());
@@ -517,7 +894,43 @@ public class AppointmentBookingService {
         return new ResolvedPatient(created, true);
     }
 
-    private DoctorAssignment resolveDoctorForSlot(Long requestedStaffId, OffsetDateTime start, OffsetDateTime end, Long excludeAppointmentId) {
+    private ResolvedPatient resolveStaffPatientProfile(Customer customer, StaffCreateAppointmentRequest req) {
+        if (req.getPatientId() != null) {
+            PatientProfile existing = patientProfileRepository.findById(req.getPatientId())
+                    .orElseThrow(() -> new BusinessException("PATIENT_NOT_FOUND",
+                            "Không tìm thấy hồ sơ bệnh nhân #" + req.getPatientId(),
+                            HttpStatus.NOT_FOUND));
+            return new ResolvedPatient(existing, false);
+        }
+
+        if (req.getPatientInfo() != null) {
+            PatientProfile created = patientProfileRepository.save(PatientProfile.builder()
+                    .customer(customer)
+                    .fullName(req.getPatientInfo().getFullName().trim())
+                    .birthYear(req.getPatientInfo().getBirthYear())
+                    .gender(req.getPatientInfo().getGender())
+                    .address(req.getPatientInfo().getAddress())
+                    .build());
+            return new ResolvedPatient(created, true);
+        }
+
+        List<PatientProfile> existingProfiles = patientProfileRepository.findByCustomerCustomerId(customer.getCustomerId());
+        if (!existingProfiles.isEmpty()) {
+            return new ResolvedPatient(existingProfiles.get(0), false);
+        }
+
+        throw new BusinessException("PATIENT_INFO_REQUIRED",
+                "Khách hàng chưa có hồ sơ bệnh nhân. Vui lòng cung cấp patientInfo (fullName, birthYear).",
+                HttpStatus.BAD_REQUEST);
+    }
+
+    private DoctorAssignment resolveDoctorForSlot(
+            Long requestedStaffId,
+            OffsetDateTime start,
+            OffsetDateTime end,
+            Long excludeAppointmentId,
+            boolean requireScheduledShift) {
+
         LocalDate date = start.atZoneSameInstant(CLINIC_ZONE).toLocalDate();
         LocalTime startTime = start.atZoneSameInstant(CLINIC_ZONE).toLocalTime();
         LocalTime endTime = end.atZoneSameInstant(CLINIC_ZONE).toLocalTime();
@@ -533,14 +946,16 @@ public class AppointmentBookingService {
                     .filter(s -> Boolean.TRUE.equals(s.getStatus()) && "DOCTOR".equals(s.getRole().getRoleName()))
                     .orElseThrow(() -> new BusinessException("DOCTOR_NOT_FOUND", "Bác sĩ không tồn tại hoặc đang ngừng hoạt động.", HttpStatus.NOT_FOUND));
 
-            boolean hasShift = doctorScheduleRepository
-                    .findByStaffStaffIdAndShiftDateAndStatus(doctor.getStaffId(), date, "ACTIVE")
-                    .stream()
-                    .anyMatch(sc -> !startTime.isBefore(sc.getStartTime()) && !endTime.isAfter(sc.getEndTime()));
-            if (!hasShift) {
-                throw new BusinessException("DOCTOR_NOT_SCHEDULED",
-                        "Bác sĩ không có ca làm việc trong khung giờ này.",
-                        HttpStatus.CONFLICT);
+            if (requireScheduledShift) {
+                boolean hasShift = doctorScheduleRepository
+                        .findByStaffStaffIdAndShiftDateAndStatus(doctor.getStaffId(), date, "ACTIVE")
+                        .stream()
+                        .anyMatch(sc -> !startTime.isBefore(sc.getStartTime()) && !endTime.isAfter(sc.getEndTime()));
+                if (!hasShift) {
+                    throw new BusinessException("DOCTOR_NOT_SCHEDULED",
+                            "Bác sĩ không có ca làm việc trong khung giờ này.",
+                            HttpStatus.CONFLICT);
+                }
             }
 
             checkDoctorLeave(doctor.getStaffId(), start, end);
@@ -556,12 +971,19 @@ public class AppointmentBookingService {
             return new DoctorAssignment(doctor, false);
         }
 
-        // Auto-Assignment (5.3.8 mục 1): chọn bác sĩ có ca ACTIVE bao trùm, không nghỉ, không bận và ít lịch nhất trong ngày
-        List<DoctorSchedule> schedules = doctorScheduleRepository.findByShiftDateAndStatus(date, "ACTIVE");
-        List<StaffAccount> candidates = schedules.stream()
-                .filter(sc -> !startTime.isBefore(sc.getStartTime()) && !endTime.isAfter(sc.getEndTime()))
-                .map(DoctorSchedule::getStaff)
-                .filter(s -> Boolean.TRUE.equals(s.getStatus()) && "DOCTOR".equals(s.getRole().getRoleName()))
+        // Auto-Assignment: ưu tiên bác sĩ có ca ACTIVE; nếu không yêu cầu ca (WALK_IN/cấp cứu) xét toàn bộ bác sĩ đang hoạt động
+        List<StaffAccount> pool;
+        if (requireScheduledShift) {
+            pool = doctorScheduleRepository.findByShiftDateAndStatus(date, "ACTIVE").stream()
+                    .filter(sc -> !startTime.isBefore(sc.getStartTime()) && !endTime.isAfter(sc.getEndTime()))
+                    .map(DoctorSchedule::getStaff)
+                    .filter(s -> Boolean.TRUE.equals(s.getStatus()) && "DOCTOR".equals(s.getRole().getRoleName()))
+                    .toList();
+        } else {
+            pool = staffAccountRepository.findByRoleRoleNameAndStatusTrue("DOCTOR");
+        }
+
+        List<StaffAccount> candidates = pool.stream()
                 .filter(doc -> !isDoctorOnLeave(doc.getStaffId(), date, startTime, endTime))
                 .filter(doc -> dayAppts.stream()
                         .filter(a -> a.getStaff().getStaffId().equals(doc.getStaffId()))
@@ -599,23 +1021,30 @@ public class AppointmentBookingService {
     }
 
     private DentalChair resolveAvailableChair(Long chairId, OffsetDateTime start, OffsetDateTime end, Long excludeAppointmentId) {
-        if (chairId != null) {
-            return dentalChairRepository.findById(chairId)
-                    .filter(c -> "ACTIVE".equals(c.getStatus()))
-                    .orElseThrow(() -> new BusinessException("CHAIR_NOT_FOUND", "Ghế nha không tồn tại hoặc đang bảo trì.", HttpStatus.NOT_FOUND));
-        }
-
-        List<DentalChair> activeChairs = dentalChairRepository.findByStatus("ACTIVE");
-        if (activeChairs.isEmpty()) {
-            throw new BusinessException("NO_ACTIVE_CHAIR", "Không có ghế nha khả dụng.", HttpStatus.CONFLICT);
-        }
-
         LocalDate date = start.atZoneSameInstant(CLINIC_ZONE).toLocalDate();
         OffsetDateTime dayStart = date.atStartOfDay(CLINIC_ZONE).toOffsetDateTime();
         OffsetDateTime dayEnd = date.plusDays(1).atStartOfDay(CLINIC_ZONE).toOffsetDateTime();
         List<Appointment> dayAppts = appointmentRepository.findActiveAppointmentsInRange(dayStart, dayEnd).stream()
                 .filter(a -> excludeAppointmentId == null || !a.getAppointmentId().equals(excludeAppointmentId))
                 .toList();
+
+        if (chairId != null) {
+            DentalChair chair = dentalChairRepository.findById(chairId)
+                    .filter(c -> "ACTIVE".equals(c.getStatus()))
+                    .orElseThrow(() -> new BusinessException("CHAIR_NOT_FOUND", "Ghế nha không tồn tại hoặc đang bảo trì.", HttpStatus.NOT_FOUND));
+            boolean busy = dayAppts.stream()
+                    .filter(a -> a.getChair().getChairId().equals(chair.getChairId()))
+                    .anyMatch(a -> start.isBefore(getEffectiveEndTime(a)) && end.isAfter(a.getDateTime()));
+            if (busy) {
+                throw new BusinessException("APPT_SLOT_CONFLICT", "Ghế nha đã kín trong khung giờ này.", HttpStatus.CONFLICT);
+            }
+            return chair;
+        }
+
+        List<DentalChair> activeChairs = dentalChairRepository.findByStatus("ACTIVE");
+        if (activeChairs.isEmpty()) {
+            throw new BusinessException("NO_ACTIVE_CHAIR", "Không có ghế nha khả dụng.", HttpStatus.CONFLICT);
+        }
 
         for (DentalChair chair : activeChairs) {
             boolean busy = dayAppts.stream()
@@ -658,7 +1087,13 @@ public class AppointmentBookingService {
         };
     }
 
-    private AppointmentResponse toResponse(Appointment a, List<AppointmentServiceEntity> services, boolean includeChairInfo) {
+    private AppointmentResponse toResponse(
+            Appointment a,
+            List<AppointmentServiceEntity> services,
+            boolean includeChairInfo,
+            boolean hasLeaveConflict,
+            Boolean customerBlacklisted) {
+
         OffsetDateTime computedEnd = getEffectiveEndTime(a);
         OffsetDateTime now = OffsetDateTime.now(CLINIC_ZONE);
         int changeMinHours = clinicConfigService.getCustomerChangeMinHours();
@@ -688,8 +1123,11 @@ public class AppointmentBookingService {
                 .statusLabel(toStatusLabel(a.getStatus()))
                 .source(a.getSource())
                 .holdUntil(a.getHoldUntil())
+                .actualArrivalAt(a.getActualArrivalAt())
                 .canModify(canModify)
                 .isPriority(a.getIsPriority())
+                .hasLeaveConflict(includeChairInfo ? hasLeaveConflict : null)
+                .customerBlacklisted(customerBlacklisted)
                 .cancelReason(a.getCancelReason())
                 .note(displayNote)
                 .createdAt(a.getCreatedAt())
@@ -697,6 +1135,7 @@ public class AppointmentBookingService {
                         .map(s -> ServiceItemDto.builder()
                                 .serviceId(s.getService() != null ? s.getService().getServiceId() : null)
                                 .serviceName(s.getService() != null ? s.getService().getName() : "Dịch vụ tạm")
+                                .isTemporary(s.getIsTemporary())
                                 .durationSnapshot(s.getDurationSnapshot())
                                 .priceSnapshot(s.getPriceSnapshot())
                                 .build())

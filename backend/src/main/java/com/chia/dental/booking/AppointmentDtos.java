@@ -29,6 +29,9 @@ public class AppointmentDtos {
         @Pattern(regexp = "^(MALE|FEMALE|OTHER)$", message = "Giới tính phải là MALE, FEMALE hoặc OTHER")
         private String gender;
 
+        @Size(max = 255)
+        private String address;
+
         @Size(max = 30)
         private String relation;
 
@@ -72,6 +75,50 @@ public class AppointmentDtos {
     }
 
     @Data
+    public static class TemporaryServiceDto {
+        @NotNull(message = "Vui lòng nhập thời lượng dịch vụ tạm (phút)")
+        @Min(value = 5, message = "Thời lượng dịch vụ tạm tối thiểu 5 phút")
+        @Max(value = 240, message = "Thời lượng dịch vụ tạm tối đa 240 phút")
+        private Short durationMinutes;
+
+        @Size(max = 200)
+        private String description;
+    }
+
+    @Data
+    public static class StaffCreateAppointmentRequest {
+        @NotBlank(message = "Vui lòng chọn nguồn đặt lịch (PHONE, SOCIAL, WALK_IN)")
+        @Pattern(regexp = "^(PHONE|SOCIAL|WALK_IN)$", message = "source phải là PHONE, SOCIAL hoặc WALK_IN")
+        private String source;
+
+        @NotBlank(message = "Số điện thoại khách hàng không được để trống")
+        @Pattern(regexp = "^\\+?[0-9]{9,15}$", message = "Số điện thoại không hợp lệ")
+        private String phone;
+
+        private Long patientId; // Nếu null -> tạo mới bằng patientInfo
+
+        @Valid
+        private PatientInfoDto patientInfo;
+
+        @JsonAlias("doctorId")
+        private Long staffId; // Tùy chọn: nếu null tự động chọn bác sĩ rảnh
+
+        private Long chairId; // Tùy chọn: nếu null tự động chọn ghế trống
+
+        private OffsetDateTime dateTime; // Tùy chọn với WALK_IN (mặc định now), bắt buộc với PHONE/SOCIAL
+
+        private List<Long> serviceIds; // Tùy chọn nếu có temporaryService (WALK_IN)
+
+        @Valid
+        private TemporaryServiceDto temporaryService; // Dịch vụ tạm thời (is_temporary = true, service_id = null)
+
+        private Boolean isPriority = false; // Đánh dấu ca cấp cứu ưu tiên
+
+        @Size(max = 500)
+        private String note;
+    }
+
+    @Data
     public static class CustomerRescheduleRequest {
         @NotNull(message = "Vui lòng chọn ngày giờ hẹn mới")
         private OffsetDateTime dateTime;
@@ -80,6 +127,20 @@ public class AppointmentDtos {
         private Long staffId; // Tùy chọn: đổi bác sĩ hoặc để trống giữ nguyên/tự phân bổ
 
         @Size(max = 500, message = "Ghi chú tối đa 500 ký tự")
+        private String note;
+    }
+
+    @Data
+    public static class StaffRescheduleRequest {
+        @NotNull(message = "Vui lòng chọn ngày giờ hẹn mới")
+        private OffsetDateTime dateTime;
+
+        @JsonAlias("doctorId")
+        private Long staffId;
+
+        private Long chairId;
+
+        @Size(max = 500)
         private String note;
     }
 
@@ -98,12 +159,21 @@ public class AppointmentDtos {
     }
 
     @Data
+    public static class ReverseNoShowRequest {
+        @NotBlank(message = "Bắt buộc nhập lý do hoàn tác trạng thái Không đến")
+        @Size(max = 255)
+        private String reversedReason;
+    }
+
+    @Data
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     public static class ServiceItemDto {
         private Long serviceId;
         private String serviceName;
+        private Boolean isTemporary;
         private Short durationSnapshot;
         private BigDecimal priceSnapshot;
     }
@@ -131,8 +201,11 @@ public class AppointmentDtos {
         private String statusLabel;
         private String source;
         private OffsetDateTime holdUntil;
+        private OffsetDateTime actualArrivalAt;
         private Boolean canModify;
         private Boolean isPriority;
+        private Boolean hasLeaveConflict;
+        private Boolean customerBlacklisted;
         private String cancelReason;
         private String note;
         private OffsetDateTime createdAt;

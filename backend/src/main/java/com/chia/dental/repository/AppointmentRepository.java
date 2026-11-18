@@ -35,10 +35,19 @@ public interface AppointmentRepository extends JpaRepository<Appointment, Long> 
         JOIN FETCH a.patient p
         JOIN FETCH a.staff s
         JOIN FETCH a.chair c
-        WHERE (:status IS NULL OR a.status = :status)
-        ORDER BY a.dateTime DESC
+        WHERE (:status = '' OR a.status = :status)
+          AND (:staffId = -1L OR s.staffId = :staffId)
+          AND (:chairId = -1L OR c.chairId = :chairId)
+          AND a.dateTime >= :startOfDay
+          AND a.dateTime < :endOfDay
+        ORDER BY a.isPriority DESC, a.dateTime DESC
     """)
-    List<Appointment> findAllWithDetails(@Param("status") String status);
+    List<Appointment> searchStaffAppointments(
+            @Param("status") String status,
+            @Param("staffId") long staffId,
+            @Param("chairId") long chairId,
+            @Param("startOfDay") OffsetDateTime startOfDay,
+            @Param("endOfDay") OffsetDateTime endOfDay);
 
     @Query("""
         SELECT a FROM Appointment a
@@ -61,4 +70,12 @@ public interface AppointmentRepository extends JpaRepository<Appointment, Long> 
         ORDER BY a.dateTime DESC
     """)
     List<Appointment> findRecentAppointmentsForDoctorSuggestion(@Param("customerId") Long customerId);
+
+    @Query("""
+        SELECT a FROM Appointment a
+        WHERE a.status = 'PENDING'
+          AND a.holdUntil IS NOT NULL
+          AND a.holdUntil <= :now
+    """)
+    List<Appointment> findExpiredPendingAppointments(@Param("now") OffsetDateTime now);
 }
