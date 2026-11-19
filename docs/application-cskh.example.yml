@@ -1,0 +1,25 @@
+# TÙY CHỌN — chỉ cần khi muốn bật Zalo ZNS thật hoặc đổi chu kỳ job CSKH.
+# Mặc định (không cấu hình gì): Zalo tắt -> mọi tin chuyển SMS mock (chỉ ghi log), job chạy theo chu kỳ mặc định trong code.
+# Cách dùng: dán các khối dưới đây vào backend/src/main/resources/application.yml (dưới `app:`),
+# hoặc tạo application-local.yml cùng nội dung và chạy với --spring.profiles.active=local.
+app:
+  scheduling:
+    care-dispatch-ms: 60000       # quét nhắc lịch 24h/2h + gửi tin đến hạn
+    care-overdue-scan-ms: 300000  # đánh dấu quá hạn SLA 48h làm việc
+    care-reconcile-ms: 600000     # bù việc CSKH cho lịch đã hoàn tất bị lỡ sự kiện
+  care:
+    feedback-base-url: ${CARE_FEEDBACK_BASE_URL:http://localhost:5173/feedback}  # link K9 = <url>/<token>
+    batch-size: 50
+  zalo:
+    enabled: ${ZALO_ENABLED:false}
+    base-url: https://business.openapi.zalo.me
+    access-token: ${ZALO_ACCESS_TOKEN:}   # KHÔNG commit token vào git
+    mode: ${ZALO_MODE:}                   # "development" để gửi thử; để trống khi chạy thật
+    timeout-ms: 5000
+    template-ids:                         # template_id đã được Zalo duyệt
+      APPOINTMENT_REMINDER: ${ZALO_TPL_REMINDER:}
+      POST_VISIT_CHECK: ${ZALO_TPL_POST_VISIT:}
+      RECALL: ${ZALO_TPL_RECALL:}
+  sms:
+    provider: mock                        # mock = chỉ ghi log
+    brandname: CHIA
