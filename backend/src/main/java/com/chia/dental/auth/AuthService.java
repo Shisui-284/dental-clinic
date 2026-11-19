@@ -1,6 +1,7 @@
 package com.chia.dental.auth;
 
 import com.chia.dental.auth.AuthDtos.*;
+import com.chia.dental.common.audit.AuditLogService;
 import com.chia.dental.common.exception.BusinessException;
 import com.chia.dental.entity.*;
 import com.chia.dental.repository.*;
@@ -36,6 +37,7 @@ public class AuthService {
     private final StaffAccountRepository staffAccountRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    private final AuditLogService auditLogService;
 
     @Value("${app.jwt.expiration-ms:86400000}")
     private long jwtExpirationMs;
@@ -278,6 +280,19 @@ public class AuthService {
                 .fullName(staff.getFullName())
                 .role(roleName)
                 .build();
+    }
+
+    public void staffLogout(UserPrincipal principal) {
+        if (principal != null && "STAFF".equals(principal.getType())) {
+            auditLogService.logStaff(
+                    principal.getId(),
+                    "STAFF_LOGOUT",
+                    "staff_account",
+                    principal.getId(),
+                    null,
+                    java.util.Map.of("username", principal.getUsername(), "role", principal.getRole())
+            );
+        }
     }
 
     public UserPrincipal getCurrentUser(UserPrincipal principal) {

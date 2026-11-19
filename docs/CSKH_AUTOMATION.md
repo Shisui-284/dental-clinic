@@ -73,3 +73,4 @@ Gửi tin: kiểm tra còn phù hợp (lịch còn Đã xác nhận, đúng gi�
 - `complete` mới là bản tối thiểu của UC-14.
 - Test mới chỉ là unit test (`SymptomDetectorTest`, `WorkingTimeCalculatorTest` có dùng Mockito); chưa có test tích hợp cho SQL. Các test `@SpringBootTest` có sẵn của team cần DB đã chạy `05_cskh_patch.sql`.
 - `complete` có thể trùng với UC-14 đầy đủ nếu đồng đội làm sau: khi đó giữ một nơi duy nhất, chỉ cần phát `AppointmentCompletedEvent` (hoặc gọi `CareTriggerService.onAppointmentCompleted`).
+ 

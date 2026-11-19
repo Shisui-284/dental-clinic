@@ -72,6 +72,7 @@ function mapAppointment(a) {
     doctorName: a.doctorName || null,
     doctorAutoAssigned: !!a.doctorAutoAssigned,
     chairId: a.chairName || str(a.chairId),
+    chairIdNum: str(a.chairId),
     start: a.dateTime,
     duration: Number(a.duration) || 0,
     endTime: a.endTime,
@@ -132,6 +133,7 @@ function serviceIdsOf(ids) {
 /** Lễ tân L2: nguồn của UI → source hợp lệ của backend. */
 function staffSourceOf(source) {
   if (source === "WALK_IN") return "WALK_IN";
+  if (source === "SOCIAL") return "SOCIAL";
   return "PHONE"; // RECEPTION / EMERGENCY / FOLLOW_UP đều là lịch đặt qua lễ tân
 }
 
@@ -150,17 +152,37 @@ export const live = {
     };
   },
 
+  async staffLogout() {
+    return post("/api/v1/auth/staff/logout", {});
+  },
+
   async checkPhone(phone) {
-    const r = await post("/api/v1/auth/customer/check-phone", { phone });
-    return {
-      phone: r.phone || phone,
-      isBlacklisted: !!r.blacklisted,
-      hasProfile: !!r.existingCustomer,
-      suggestedDoctorId: str(r.suggestedDoctorId),
-      suggestedDoctorName: r.suggestedDoctorName || null,
-      lastVisit: null,
-      patients: list(r.patients),
-    };
+    try {
+      const r = await post("/api/v1/auth/customer/check-phone", { phone });
+      return {
+        phone: r.phone || phone,
+        isBlacklisted: !!r.blacklisted,
+        hasProfile: !!r.existingCustomer,
+        suggestedDoctorId: str(r.suggestedDoctorId),
+        suggestedDoctorName: r.suggestedDoctorName || null,
+        lastVisit: null,
+        patients: list(r.patients),
+      };
+    } catch (ex) {
+      if (ex?.status === 403 && ex?.code === "CUSTOMER_BLACKLISTED") {
+        return {
+          phone,
+          isBlacklisted: true,
+          hasProfile: true,
+          message: ex.message,
+          suggestedDoctorId: null,
+          suggestedDoctorName: null,
+          lastVisit: null,
+          patients: [],
+        };
+      }
+      throw ex;
+    }
   },
 
   async requestOtp(phone) {
@@ -272,16 +294,26 @@ export const live = {
   },
 
   async staffCreate(payload) {
-    const r = await post("/api/v1/staff/appointments", {
+    const svcIds = serviceIdsOf(payload.serviceIds);
+    const body = {
       source: staffSourceOf(payload.source),
       phone: payload.phone,
       patientInfo: patientInfoOf(payload.patient),
       staffId: num(payload.doctorId),
-      dateTime: payload.start,
-      serviceIds: serviceIdsOf(payload.serviceIds),
+      ...(payload.start ? { dateTime: payload.start } : {}),
+      ...(svcIds.length ? { serviceIds: svcIds } : {}),
+      ...(payload.temporaryService
+        ? {
+            temporaryService: {
+              durationMinutes: Number(payload.temporaryService.durationMinutes) || 30,
+              description: payload.temporaryService.description || "Khám vãng lai",
+            },
+          }
+        : {}),
       isPriority: !!payload.isPriority,
       note: payload.note || undefined,
-    });
+    };
+    const r = await post("/api/v1/staff/appointments", body);
     return mapAppointment(r);
   },
 
@@ -337,5 +369,116 @@ export const live = {
       reason: l.reason,
     }));
     return { date, leaves };
+  },
+
+  /* ---------- Ghế nha, Ca làm việc, Nghỉ phép (B1, Q1) & Blacklist (Q2) ---------- */
+  async staffChairs() {
+    const data = await get("/api/v1/staff/chairs");
+    return list(data).map((c) => ({
+      id: str(c.chairId),
+      name: c.name || `Ghế ${c.chairId}`,
+      status: c.status || "ACTIVE",
+    }));
+  },
+
+  async doctorSchedules(params = {}) {
+    const data = await get("/api/v1/staff/schedules", {
+      ...(num(params.staffId) !== undefined ? { staffId: num(params.staffId) } : {}),
+      ...(params.fromDate ? { fromDate: params.fromDate } : {}),
+      ...(params.toDate ? { toDate: params.toDate } : {}),
+      ...(params.status ? { status: params.status } : {}),
+    });
+    return list(data).map((s) => ({
+      id: str(s.scheduleId),
+      staffId: str(s.staffId),
+      doctorName: s.doctorName,
+      shiftDate: s.shiftDate,
+      startTime: String(s.startTime || "").slice(0, 5),
+      endTime: String(s.endTime || "").slice(0, 5),
+      status: s.status,
+    }));
+  },
+
+  async createSchedule(payload) {
+    return post("/api/v1/staff/schedules", {
+      staffId: num(payload.staffId),
+      shiftDate: payload.shiftDate,
+      startTime: payload.startTime,
+      endTime: payload.endTime,
+    });
+  },
+
+  async doctorRequestLeave(payload) {
+    return post("/api/v1/doctor/leaves", {
+      ...(num(payload.staffId) !== undefined ? { staffId: num(payload.staffId) } : {}),
+      leaveDate: payload.leaveDate,
+      startTime: payload.startTime,
+      endTime: payload.endTime,
+      reason: payload.reason,
+    });
+  },
+
+  async staffLeaves(params = {}) {
+    const data = await get("/api/v1/staff/leaves", {
+      ...(num(params.staffId) !== undefined ? { staffId: num(params.staffId) } : {}),
+      ...(params.status ? { status: params.status } : {}),
+      ...(params.fromDate ? { fromDate: params.fromDate } : {}),
+      ...(params.toDate ? { toDate: params.toDate } : {}),
+    });
+    return list(data).map((l) => ({
+      id: str(l.leaveId),
+      staffId: str(l.staffId),
+      doctorName: l.doctorName,
+      leaveDate: l.leaveDate,
+      startTime: String(l.startTime || "").slice(0, 5),
+      endTime: String(l.endTime || "").slice(0, 5),
+      reason: l.reason,
+      status: l.status,
+      approvedByName: l.approvedByName || null,
+      approvedAt: l.approvedAt || null,
+    }));
+  },
+
+  async approveLeave(id, decision) {
+    return patch(`/api/v1/manager/leaves/${id}/approval`, { decision });
+  },
+
+  async leaveConflicts(params = {}) {
+    const data = await get("/api/v1/staff/appointments/leave-conflicts", {
+      ...(num(params.staffId) !== undefined ? { staffId: num(params.staffId) } : {}),
+      ...(num(params.leaveId) !== undefined ? { leaveId: num(params.leaveId) } : {}),
+    });
+    return list(data).map((c) => ({
+      appointmentId: str(c.appointmentId),
+      appointmentCode: c.appointmentCode,
+      patientName: c.patientName,
+      phone: c.bookedByPhone,
+      doctorName: c.doctorName,
+      dateTime: c.dateTime,
+      endTime: c.endTime,
+      leaveId: str(c.leaveId),
+      leaveDate: c.leaveDate,
+      leaveStartTime: String(c.leaveStartTime || "").slice(0, 5),
+      leaveEndTime: String(c.leaveEndTime || "").slice(0, 5),
+      leaveReason: c.leaveReason,
+    }));
+  },
+
+  async managerBlacklist() {
+    const data = await get("/api/v1/manager/blacklist");
+    return list(data).map((b) => ({
+      customerId: str(b.customerId),
+      phone: b.phone,
+      patientNames: list(b.patientNames),
+      activeNoShowCount: Number(b.activeNoShowCountInWindow ?? b.activeNoShowCount ?? 0),
+      threshold: Number(b.threshold ?? 3),
+      windowMonths: Number(b.windowMonths ?? 12),
+      stillExceedsThreshold: !!b.stillExceedsThreshold,
+      isBlacklisted: b.isBlacklisted !== false,
+    }));
+  },
+
+  async unlockBlacklist(customerId, reason) {
+    return post(`/api/v1/manager/blacklist/${customerId}/unlock`, { reason });
   },
 };

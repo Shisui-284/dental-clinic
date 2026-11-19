@@ -119,6 +119,16 @@ public class ScheduleDtos {
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
+    public static class ChairDto {
+        private Long chairId;
+        private String name;
+        private String status;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class LeaveApprovalResponse {
         private DoctorLeaveDto leave;
         private int conflictCount;

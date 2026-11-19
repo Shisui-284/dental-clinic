@@ -7,6 +7,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 
@@ -40,6 +41,14 @@ public class AuthController {
     @Operation(summary = "Đăng nhập nội bộ (Lễ tân, Bác sĩ, Quản lý) - tài khoản mẫu mật khẩu 123456")
     public ApiResponse<AuthTokenResponse> staffLogin(@Valid @RequestBody StaffLoginRequest req) {
         return ApiResponse.ok("Đăng nhập thành công", authService.staffLogin(req));
+    }
+
+    @PostMapping("/staff/logout")
+    @PreAuthorize("hasAnyRole('RECEPTIONIST','MANAGER','DOCTOR')")
+    @Operation(summary = "Đăng xuất nhân sự và ghi nhận nhật ký hệ thống")
+    public ApiResponse<Void> staffLogout(@AuthenticationPrincipal UserPrincipal principal) {
+        authService.staffLogout(principal);
+        return ApiResponse.ok("Đăng xuất thành công", null);
     }
 
     @GetMapping("/me")

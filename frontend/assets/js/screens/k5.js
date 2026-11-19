@@ -20,7 +20,7 @@ export default {
     const doctors = await api.doctors();
     const chosen = services.filter((s) => d.serviceIds.includes(s.id));
     const doc = doctors.find((x) => x.id === d.doctorId);
-    const dur = chosen.reduce((t, s) => t + s.duration, 0) + 10;
+    const dur = d.durationHint || (chosen.reduce((t, s) => t + s.duration, 0) + 5);
     const price = chosen.reduce((t, s) => t + s.price, 0);
 
     return `
@@ -205,7 +205,7 @@ export default {
         setDraft({ lastAppointmentId: appt.id });
         navigate("k6", { id: appt.id });
       } catch (ex) {
-        if (ex.code === "SLOT_TAKEN") {
+        if (ex.code === "SLOT_TAKEN" || ex.code === "APPT_SLOT_CONFLICT") {
           alertBox.innerHTML = `<div class="banner danger"><b>Khung giờ vừa được người khác giữ.</b> Vui lòng chọn giờ khác.
             <div style="margin-top:8px"><a class="btn sm primary" href="#/k4">Chọn giờ khác</a></div></div>`;
         } else {

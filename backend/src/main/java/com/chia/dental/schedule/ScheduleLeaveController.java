@@ -69,9 +69,16 @@ public class ScheduleLeaveController {
         return ApiResponse.ok(scheduleLeaveService.listLeaves(principal, staffId, status, fromDate, toDate));
     }
 
+    @GetMapping("/staff/chairs")
+    @PreAuthorize("hasAnyRole('DOCTOR','RECEPTIONIST','MANAGER')")
+    @Operation(summary = "Danh sách ghế nha khoa đang hoạt động (ACTIVE) dùng cho màn L1/L3")
+    public ApiResponse<List<ChairDto>> listActiveChairs() {
+        return ApiResponse.ok(scheduleLeaveService.listActiveChairs());
+    }
+
     @PatchMapping("/manager/leaves/{id}/approval")
-    @PreAuthorize("hasAnyRole('MANAGER','RECEPTIONIST')")
-    @Operation(summary = "Duyệt/từ chối đơn nghỉ bác sĩ; trả kèm danh sách lịch CONFIRMED bị ảnh hưởng từ View v_appointment_leave_conflict")
+    @PreAuthorize("hasRole('MANAGER')")
+    @Operation(summary = "Quản lý duyệt/từ chối đơn nghỉ bác sĩ; trả kèm danh sách lịch CONFIRMED bị ảnh hưởng từ View v_appointment_leave_conflict")
     public ApiResponse<LeaveApprovalResponse> approveOrRejectLeave(
             @PathVariable Long id,
             @AuthenticationPrincipal UserPrincipal principal,

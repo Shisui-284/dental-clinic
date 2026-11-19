@@ -17,6 +17,10 @@ export const api = {
     (username, password) => post("/api/v1/auth/staff/login", { username, password }),
     live.staffLogin,
   ),
+  staffLogout: route(
+    () => post("/api/v1/auth/staff/logout", {}),
+    live.staffLogout,
+  ),
   checkPhone: route(
     (phone) => post("/api/v1/auth/customer/check-phone", { phone }),
     live.checkPhone,
@@ -101,5 +105,41 @@ export const api = {
   schedules: route(
     (date) => get("/api/v1/staff/schedules", { date }),
     live.schedules,
+  ),
+  staffChairs: route(
+    () => get("/api/v1/staff/chairs"),
+    live.staffChairs,
+  ),
+  doctorSchedules: route(
+    (params) => get("/api/v1/staff/doctor-schedules", params),
+    live.doctorSchedules,
+  ),
+  createSchedule: route(
+    (payload) => post("/api/v1/staff/schedules", payload),
+    live.createSchedule,
+  ),
+  doctorRequestLeave: route(
+    (payload) => post("/api/v1/doctor/leaves", payload),
+    live.doctorRequestLeave,
+  ),
+  staffLeaves: route(
+    (params) => get("/api/v1/staff/leaves", params),
+    live.staffLeaves,
+  ),
+  approveLeave: route(
+    (id, decision) => patch(`/api/v1/manager/leaves/${id}/approval`, { decision }),
+    live.approveLeave,
+  ),
+  leaveConflicts: route(
+    (params) => get("/api/v1/staff/appointments/leave-conflicts", params),
+    live.leaveConflicts,
+  ),
+  managerBlacklist: route(
+    () => get("/api/v1/manager/blacklist"),
+    live.managerBlacklist,
+  ),
+  unlockBlacklist: route(
+    (customerId, reason) => post(`/api/v1/manager/blacklist/${customerId}/unlock`, { reason }),
+    live.unlockBlacklist,
   ),
 };

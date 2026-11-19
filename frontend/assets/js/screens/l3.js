@@ -79,7 +79,8 @@ export default {
           <div class="tl">
             ${filtered.map((a) => {
               const late = a.status === "CONFIRMED" && Date.now() - new Date(a.start).getTime() > 15 * 60000;
-              const onLeave = leaves.some((l) => l.doctorId === a.doctorId);
+              const onLeave = a.hasLeaveConflict || leaves.some((l) => l.doctorId === a.doctorId);
+              const canEdit = a.status === "PENDING" || a.status === "CONFIRMED";
               return `<div class="row-item" data-appt="${esc(a.id)}">
                 <div class="time">${fmtTime(a.start)}</div>
                 <div class="dot" style="border-color:${a.status === "NO_SHOW" ? "var(--danger)" : a.status === "CHECKED_IN" ? "#1D4ED8" : "var(--teal)"}"></div>
@@ -89,7 +90,7 @@ export default {
                     ${statusTag(a.status)}
                     ${a.isPriority ? '<span class="tag priority">Cấp cứu</span>' : ""}
                     ${late ? `<span class="tag noshow">Trễ ${Math.floor((Date.now() - new Date(a.start).getTime()) / 60000)} phút</span>` : ""}
-                    ${onLeave ? '<span class="tag noshow">Bác sĩ nghỉ</span>' : ""}
+                    ${onLeave ? '<span class="tag noshow">Trùng ca nghỉ BS</span>' : ""}
                     <div class="spacer"></div>
                     <span class="small muted">${esc(a.code)}</span>
                   </div>
@@ -97,10 +98,12 @@ export default {
                     ${fmtRange(a.start, a.duration)} · ${esc(a.doctorName || "Chưa chốt bác sĩ")} · Ghế ${esc(a.chairId || "—")} · ${esc(sourceLabel(a.source))} · ${esc(a.phone)}
                   </div>
                   <div class="small" style="margin-top:4px">${a.services.map((s) => esc(s.name)).join(" · ")}</div>
-                  <div class="row" style="margin-top:8px;gap:6px">
+                  <div class="row" style="margin-top:8px;gap:6px;flex-wrap:wrap">
                     ${a.status === "CONFIRMED" ? `
                       <button class="btn sm primary" data-checkin="${esc(a.id)}">Đã đến</button>
                       <button class="btn sm danger" data-noshow="${esc(a.id)}">Không đến</button>` : ""}
+                    ${canEdit ? `<button class="btn sm" data-reschedule="${esc(a.id)}">Đổi lịch</button>` : ""}
+                    ${canEdit ? `<button class="btn sm ghost" data-cancel="${esc(a.id)}">Hủy lịch</button>` : ""}
                     ${a.status === "NO_SHOW" ? `<button class="btn sm" data-reverse="${esc(a.id)}">Hoàn tác Không đến</button>` : ""}
                     ${a.status === "PENDING" ? `<a class="btn sm" href="#/l1?date=${esc(date)}">Sang L1 để duyệt</a>` : ""}
                     <button class="btn sm ghost" data-detail="${esc(a.id)}">Chi tiết</button>
@@ -128,9 +131,9 @@ export default {
     }, 60000);
 
     root.addEventListener("click", async (e) => {
-      const btn = e.target.closest("[data-checkin],[data-noshow],[data-reverse],[data-detail]");
+      const btn = e.target.closest("[data-checkin],[data-noshow],[data-reverse],[data-reschedule],[data-cancel],[data-detail]");
       if (!btn) return;
-      const id = btn.dataset.checkin || btn.dataset.noshow || btn.dataset.reverse || btn.dataset.detail;
+      const id = btn.dataset.checkin || btn.dataset.noshow || btn.dataset.reverse || btn.dataset.reschedule || btn.dataset.cancel || btn.dataset.detail;
 
       if (btn.dataset.checkin) {
         try { await api.checkIn(id); toast("Đã ghi nhận khách đến.", "ok"); ctx.refresh(); }
@@ -141,7 +144,7 @@ export default {
       if (btn.dataset.noshow) {
         const ok = await confirmDanger({
           title: "Đánh dấu Không đến?",
-          text: "Khách sẽ bị tính 1 lần vắng; từ 3 lần trong 12 tháng sẽ bị khóa tự đặt lịch.",
+          text: "Chỉ áp dụng khi khách đã trễ quá 15 phút. Khách sẽ bị tính 1 lần vắng; từ 3 lần trong 12 tháng sẽ bị khóa tự đặt lịch.",
           confirmLabel: "Không đến",
         });
         if (!ok) return;
@@ -164,6 +167,33 @@ export default {
         return;
       }
 
+      if (btn.dataset.cancel) {
+        const reason = await confirmDanger({
+          title: "Hủy lịch hẹn này?",
+          text: "Khung giờ sẽ được giải phóng ngay. Bắt buộc nhập lý do hủy.",
+          confirmLabel: "Hủy lịch",
+          requireReason: true,
+          reasonLabel: "Lý do hủy lịch",
+        });
+        if (!reason) return;
+        try { await api.staffCancel(id, reason); toast("Đã hủy lịch hẹn.", "ok"); ctx.refresh(); }
+        catch (ex) { toast(ex.message, "err"); }
+        return;
+      }
+
+      if (btn.dataset.reschedule) {
+        try {
+          const [r, ds, chairs] = await Promise.all([
+            api.staffAppointments({ date }),
+            api.doctors(),
+            api.staffChairs().catch(() => []),
+          ]);
+          const a = (r.items || []).find((x) => x.id === id);
+          if (a) openRescheduleDrawer(a, ds.filter((d) => d.isActive), chairs, ctx);
+        } catch (ex) { toast(ex.message, "err"); }
+        return;
+      }
+
       if (btn.dataset.detail) {
         try {
           const r = await api.staffAppointments({ date });
@@ -176,6 +206,73 @@ export default {
     return () => stop();
   },
 };
+
+function openRescheduleDrawer(a, doctors, chairs, ctx) {
+  const dt = new Date(a.start);
+  const initDate = `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, "0")}-${String(dt.getDate()).padStart(2, "0")}`;
+  const initTime = `${String(dt.getHours()).padStart(2, "0")}:${String(dt.getMinutes()).padStart(2, "0")}`;
+  const currentChair = a.chairIdNum || a.chairId || "";
+  const d = drawer({
+    title: `Đổi lịch — ${esc(a.patientName)}`,
+    sub: `${esc(a.code)} · Không bị giới hạn mốc 4 giờ`,
+    body: `
+      <div class="banner info small">Lễ tân có thể đổi ngày giờ, bác sĩ hoặc ghế nha tự do (kể cả xử lý lịch bị trùng ca nghỉ của bác sĩ).</div>
+      <div class="grid-2">
+        <label class="field"><span class="lbl">Ngày hẹn mới <span class="req">*</span></span>
+          <input type="date" data-new-date value="${esc(initDate)}">
+        </label>
+        <label class="field"><span class="lbl">Giờ hẹn mới <span class="req">*</span></span>
+          <input type="time" data-new-time value="${esc(initTime)}">
+        </label>
+      </div>
+      <label class="field"><span class="lbl">Bác sĩ phụ trách</span>
+        <select data-new-doc>
+          ${doctors.map((x) => `<option value="${esc(x.id)}" ${a.doctorId === x.id ? "selected" : ""}>${esc(x.name)}</option>`).join("")}
+        </select>
+      </label>
+      <label class="field"><span class="lbl">Ghế nha</span>
+        <select data-new-chair>
+          <option value="">— Tự động chọn ghế trống —</option>
+          ${(chairs || []).map((c) => `<option value="${esc(c.id)}" ${currentChair === c.id ? "selected" : ""}>${esc(c.name)}</option>`).join("")}
+        </select>
+      </label>
+      <label class="field"><span class="lbl">Ghi chú cập nhật</span>
+        <input type="text" data-new-note value="${esc(a.note || "")}" maxlength="500" placeholder="VD: Dời lịch do bác sĩ nghỉ đột xuất">
+      </label>
+      <div data-rerr></div>`,
+    footer: `<button class="btn" data-close>Đóng</button><div class="spacer"></div>
+      <button class="btn primary" data-save>Lưu thay đổi</button>`,
+  });
+
+  d.root.querySelector("[data-close]").onclick = () => d.close();
+  d.root.querySelector("[data-save]").onclick = async () => {
+    const newDate = d.root.querySelector("[data-new-date]").value;
+    const newTime = d.root.querySelector("[data-new-time]").value;
+    const doctorId = d.root.querySelector("[data-new-doc]").value;
+    const chairId = d.root.querySelector("[data-new-chair]").value;
+    const note = d.root.querySelector("[data-new-note]").value.trim();
+    const errBox = d.root.querySelector("[data-rerr]");
+    errBox.innerHTML = "";
+    if (!newDate || !newTime) {
+      errBox.innerHTML = `<div class="banner danger">Vui lòng chọn đủ ngày và giờ hẹn mới.</div>`;
+      return;
+    }
+    const iso = `${newDate}T${newTime}:00+07:00`;
+    try {
+      await api.staffReschedule(a.id, {
+        start: iso,
+        doctorId: doctorId || undefined,
+        chairId: chairId || undefined,
+        note: note || undefined,
+      });
+      toast("Đã đổi lịch hẹn thành công.", "ok");
+      d.close();
+      ctx.navigate("l3", { date: newDate });
+    } catch (ex) {
+      errBox.innerHTML = `<div class="banner danger">${esc(ex.message)}</div>`;
+    }
+  };
+}
 
 function showDetail(a, ctx) {
   const m = statusMeta(a.status);

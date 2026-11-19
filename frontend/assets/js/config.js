@@ -9,8 +9,8 @@ const KEY = "qldapm_frontend_72";
 const DEFAULTS = {
   mode: "mock",
   apiBase: "http://localhost:8080",
-  clinicName: "Nha khoa An Tâm",
-  hotline: "1900 1234",
+  clinicName: "Phòng khám nha khoa CHIA",
+  hotline: "1900-6868",
 };
 
 function read() {

@@ -26,8 +26,9 @@ public class StaffAppointmentController {
 
     @GetMapping
     @PreAuthorize("hasAnyRole('RECEPTIONIST','MANAGER','DOCTOR')")
-    @Operation(summary = "Tra cứu danh sách lịch hẹn theo bộ lọc (ngày, trạng thái, bác sĩ, ghế, cảnh báo trùng lịch nghỉ)")
+    @Operation(summary = "Tra cứu danh sách lịch hẹn theo bộ lọc (Bác sĩ chỉ xem được lịch của chính mình)")
     public ApiResponse<List<AppointmentResponse>> listAppointments(
+            @AuthenticationPrincipal UserPrincipal principal,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
             @RequestParam(required = false) String status,
             @RequestParam(required = false) Long staffId,
@@ -35,7 +36,7 @@ public class StaffAppointmentController {
             @RequestParam(required = false) Long chairId,
             @RequestParam(required = false) Boolean onlyLeaveConflict) {
         Long effectiveStaffId = staffId != null ? staffId : doctorId;
-        return ApiResponse.ok(bookingService.getStaffAppointments(date, status, effectiveStaffId, chairId, onlyLeaveConflict));
+        return ApiResponse.ok(bookingService.getStaffAppointments(principal, date, status, effectiveStaffId, chairId, onlyLeaveConflict));
     }
 
     @PostMapping

@@ -4,7 +4,7 @@ import { esc, toast, ticker } from "../core/ui.js";
 import { fmtTime, fmtDate, money, sourceLabel } from "../core/format.js";
 import { todayKey } from "../core/ui.js";
 
-const SOURCES = ["RECEPTION", "WALK_IN", "EMERGENCY", "FOLLOW_UP"];
+const SOURCES = ["RECEPTION", "SOCIAL", "WALK_IN", "EMERGENCY", "FOLLOW_UP"];
 
 export default {
   id: "l2",
@@ -43,10 +43,26 @@ export default {
           <div data-source-note class="help" style="margin-bottom:12px"></div>
 
           <div class="card-title">Dịch vụ <span class="req">*</span></div>
-          <div class="stack" data-services style="max-height:280px;overflow:auto;padding-right:4px">
+          <div class="stack" data-services style="max-height:240px;overflow:auto;padding-right:4px">
             ${services.map((s) => `<label class="svc" data-svc="${esc(s.id)}" data-dur="${s.duration}" data-price="${s.price}">
               <input type="checkbox"><div class="grow"><div class="name">${esc(s.name)}</div><div class="meta">${esc(s.group)} · ${s.duration} phút</div></div>
               <div class="price">${money(s.price)}</div></label>`).join("")}
+          </div>
+
+          <div data-temp-box class="hidden" style="margin-top:12px;padding:12px;border:1px dashed var(--teal);border-radius:10px;background:#F0FDFA">
+            <label class="check" style="margin-bottom:8px"><input type="checkbox" data-use-temp>
+              <span><b>Dịch vụ tạm thời</b> (khách vãng lai chưa rõ dịch vụ cụ thể)</span></label>
+            <div class="grid-2 hidden" data-temp-fields>
+              <label class="field" style="margin:0"><span class="lbl">Thời lượng dự kiến (phút)</span>
+                <input type="number" data-temp-dur min="5" max="240" value="30"></label>
+              <label class="field" style="margin:0"><span class="lbl">Mô tả dịch vụ tạm</span>
+                <input type="text" data-temp-desc maxlength="200" placeholder="VD: Đau răng hàm, khám sơ bộ"></label>
+            </div>
+          </div>
+
+          <div data-auto-prio-box class="hidden" style="margin-top:10px">
+            <label class="check"><input type="checkbox" data-auto-prio checked>
+              <span>Tự động chèn vào khung giờ trống gần nhất hôm nay (không cần chọn slot thủ công)</span></label>
           </div>
 
           <div class="grid-2" style="margin-top:14px">
@@ -87,24 +103,44 @@ export default {
     const createBtn = root.querySelector("[data-create]");
     const summary = root.querySelector("[data-summary]");
     const alertBox = root.querySelector("[data-alert]");
+    const tempBox = root.querySelector("[data-temp-box]");
+    const useTemp = root.querySelector("[data-use-temp]");
+    const tempFields = root.querySelector("[data-temp-fields]");
+    const tempDurInput = root.querySelector("[data-temp-dur]");
+    const tempDescInput = root.querySelector("[data-temp-desc]");
+    const autoPrioBox = root.querySelector("[data-auto-prio-box]");
+    const autoPrioChk = root.querySelector("[data-auto-prio]");
 
     const selectedIds = () => svcBoxes.filter((n) => n.querySelector("input").checked).map((n) => n.dataset.svc);
-    const durationOf = () => svcBoxes.filter((n) => n.querySelector("input").checked)
-      .reduce((t, n) => t + Number(n.dataset.dur), 0) + 10 + (root.querySelector("[data-new]").checked ? 15 : 0);
+    const hasTemp = () => source === "WALK_IN" && useTemp.checked;
+    const isAutoSlot = () => (source === "EMERGENCY" && autoPrioChk.checked) || (source === "WALK_IN" && !start);
+    const durationOf = () => {
+      const official = svcBoxes.filter((n) => n.querySelector("input").checked)
+        .reduce((t, n) => t + Number(n.dataset.dur), 0);
+      const temp = hasTemp() ? (Number(tempDurInput.value) || 30) : 0;
+      return official + temp + 5 + (root.querySelector("[data-new]").checked ? 15 : 0);
+    };
 
     function paintSummary() {
       const ids = selectedIds();
-      const dur = ids.length ? durationOf() : 0;
+      const hasAnySvc = ids.length > 0 || hasTemp();
+      const dur = hasAnySvc ? durationOf() : 0;
       const price = svcBoxes.filter((n) => n.querySelector("input").checked).reduce((t, n) => t + Number(n.dataset.price), 0);
-      summary.textContent = ids.length ? `${ids.length} dịch vụ · ${dur} phút · ${money(price)}` : "Chưa chọn dịch vụ";
-      createBtn.disabled = !(ids.length && start && root.querySelector("[data-name]").value.trim());
+      const svcLabel = hasTemp()
+        ? (ids.length ? `${ids.length} dịch vụ + tạm` : "Dịch vụ tạm")
+        : `${ids.length} dịch vụ`;
+      summary.textContent = hasAnySvc ? `${svcLabel} · ${dur} phút · ${money(price)}` : "Chưa chọn dịch vụ";
+      const timeReady = Boolean(start) || isAutoSlot();
+      createBtn.disabled = !(hasAnySvc && timeReady && root.querySelector("[data-name]").value.trim());
     }
 
     async function loadSlots() {
       const ids = selectedIds();
       alertBox.innerHTML = "";
       if (!ids.length) {
-        slotsBox.innerHTML = `<div class="empty"><b>Chọn dịch vụ</b>Khung giờ phụ thuộc vào tổng thời lượng dịch vụ.</div>`;
+        slotsBox.innerHTML = hasTemp()
+          ? `<div class="banner info">Khách vãng lai dùng <b>Dịch vụ tạm thời</b>: hệ thống tự tiếp nhận ngay tại thời điểm hiện tại (trạng thái <b>Đã đến</b>).</div>`
+          : `<div class="empty"><b>Chọn dịch vụ</b>Khung giờ phụ thuộc vào tổng thời lượng dịch vụ.</div>`;
         start = null;
         paintSummary();
         return;
@@ -163,12 +199,27 @@ export default {
 
     function paintSourceNote() {
       const note = root.querySelector("[data-source-note]");
-      if (source === "WALK_IN") note.innerHTML = `<div class="banner info" style="margin:0">Khách vãng lai: sau khi tạo, lịch vào thẳng trạng thái <b>Đã đến</b>.</div>`;
-      else if (source === "EMERGENCY") note.innerHTML = `<div class="banner danger" style="margin:0"><b>Cấp cứu:</b> chỉ dùng khung còn trống, không tự hủy/dời lịch của khách khác.</div>`;
+      tempBox.classList.toggle("hidden", source !== "WALK_IN");
+      autoPrioBox.classList.toggle("hidden", source !== "EMERGENCY");
+      if (source !== "WALK_IN") {
+        useTemp.checked = false;
+        tempFields.classList.add("hidden");
+      }
+      if (source === "WALK_IN") note.innerHTML = `<div class="banner info" style="margin:0">Khách vãng lai: sau khi tạo, lịch vào thẳng trạng thái <b>Đã đến</b> (hỗ trợ chọn Dịch vụ tạm nếu chưa rõ).</div>`;
+      else if (source === "SOCIAL") note.innerHTML = `<div class="help" style="margin:0">Đặt hộ từ Zalo / Facebook — lịch vào thẳng <b>Đã xác nhận</b> (bỏ qua Blacklist).</div>`;
+      else if (source === "EMERGENCY") note.innerHTML = `<div class="banner danger" style="margin:0"><b>Cấp cứu:</b> tự tìm hoặc chèn vào khung còn trống gần nhất, không tự hủy/dời lịch đã xác nhận của khách khác.</div>`;
       else if (source === "FOLLOW_UP") note.innerHTML = `<div class="banner info" style="margin:0">Tái khám: tạo từ đề xuất của bác sĩ sau buổi khám trước.</div>`;
-      else note.innerHTML = `<div class="help" style="margin:0">Lễ tân tạo hộ qua điện thoại/MXH — lịch vào trạng thái <b>Đã xác nhận</b>.</div>`;
+      else note.innerHTML = `<div class="help" style="margin:0">Lễ tân tạo hộ qua điện thoại — lịch vào thẳng trạng thái <b>Đã xác nhận</b> (bỏ qua Blacklist).</div>`;
+      paintSummary();
     }
     paintSourceNote();
+
+    useTemp.addEventListener("change", () => {
+      tempFields.classList.toggle("hidden", !useTemp.checked);
+      loadSlots();
+    });
+    tempDurInput.addEventListener("input", paintSummary);
+    autoPrioChk.addEventListener("change", paintSummary);
 
     svcBoxes.forEach((n) => n.querySelector("input").addEventListener("change", (e) => {
       n.classList.toggle("on", e.target.checked);
@@ -201,12 +252,13 @@ export default {
       const name = root.querySelector("[data-name]").value.trim();
       const year = Number(root.querySelector("[data-year]").value);
       const ids = selectedIds();
+      const usingTemp = hasTemp();
       const errs = [];
       if (!/^0\d{9}$/.test(phone)) errs.push("SĐT phải gồm 10 chữ số.");
       if (!name) errs.push("Thiếu họ tên người khám.");
       if (!year) errs.push("Thiếu năm sinh.");
-      if (!ids.length) errs.push("Chọn ít nhất 1 dịch vụ.");
-      if (!start) errs.push("Chưa chọn khung giờ.");
+      if (!ids.length && !usingTemp) errs.push("Chọn ít nhất 1 dịch vụ hoặc bật Dịch vụ tạm thời.");
+      if (!start && !isAutoSlot()) errs.push("Chưa chọn khung giờ.");
       if (errs.length) { alertBox.innerHTML = `<div class="banner danger">${errs.map(esc).join("<br>")}</div>`; return; }
 
       if (source === "EMERGENCY" || source === "WALK_IN") {
@@ -223,8 +275,16 @@ export default {
           phone,
           patient: { fullName: name, birthYear: year, isNew: root.querySelector("[data-new]").checked },
           serviceIds: ids,
+          ...(usingTemp
+            ? {
+                temporaryService: {
+                  durationMinutes: Number(tempDurInput.value) || 30,
+                  description: tempDescInput.value.trim() || "Khám vãng lai",
+                },
+              }
+            : {}),
           doctorId: root.querySelector("[data-doctor]").value || undefined,
-          start,
+          start: (source === "EMERGENCY" && autoPrioChk.checked) ? undefined : (start || undefined),
           source,
           isPriority: source === "EMERGENCY",
           note: root.querySelector("[data-note]").value.trim(),

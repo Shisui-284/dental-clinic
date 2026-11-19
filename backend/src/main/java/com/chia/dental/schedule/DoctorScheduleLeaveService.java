@@ -2,9 +2,11 @@ package com.chia.dental.schedule;
 
 import com.chia.dental.common.audit.AuditLogService;
 import com.chia.dental.common.exception.BusinessException;
+import com.chia.dental.entity.DentalChair;
 import com.chia.dental.entity.DoctorLeave;
 import com.chia.dental.entity.DoctorSchedule;
 import com.chia.dental.entity.StaffAccount;
+import com.chia.dental.repository.DentalChairRepository;
 import com.chia.dental.repository.DoctorLeaveRepository;
 import com.chia.dental.repository.DoctorScheduleRepository;
 import com.chia.dental.repository.StaffAccountRepository;
@@ -30,8 +32,20 @@ public class DoctorScheduleLeaveService {
     private final DoctorScheduleRepository doctorScheduleRepository;
     private final DoctorLeaveRepository doctorLeaveRepository;
     private final StaffAccountRepository staffAccountRepository;
+    private final DentalChairRepository dentalChairRepository;
     private final LeaveConflictService leaveConflictService;
     private final AuditLogService auditLogService;
+
+    @Transactional(readOnly = true)
+    public List<ChairDto> listActiveChairs() {
+        return dentalChairRepository.findByStatus("ACTIVE").stream()
+                .map(c -> ChairDto.builder()
+                        .chairId(c.getChairId())
+                        .name(c.getChairName())
+                        .status(c.getStatus())
+                        .build())
+                .toList();
+    }
 
     @Transactional(readOnly = true)
     public List<ScheduleDto> listSchedules(
@@ -41,7 +55,7 @@ public class DoctorScheduleLeaveService {
             LocalDate toDate,
             String status) {
         // Bác sĩ chỉ xem lịch ca làm cá nhân tại B1 (5.3.4)
-        Long effectiveStaffId = "DOCTOR".equals(principal.getRole()) ? principal.getId() : staffId;
+        Long effectiveStaffId = resolveScopedDoctorId(principal, staffId);
         long staffFilter = effectiveStaffId != null ? effectiveStaffId : -1L;
         LocalDate from = fromDate != null ? fromDate : LocalDate.of(1900, 1, 1);
         LocalDate to = toDate != null ? toDate : LocalDate.of(2999, 12, 31);
@@ -131,7 +145,7 @@ public class DoctorScheduleLeaveService {
             String status,
             LocalDate fromDate,
             LocalDate toDate) {
-        Long effectiveStaffId = "DOCTOR".equals(principal.getRole()) ? principal.getId() : staffId;
+        Long effectiveStaffId = resolveScopedDoctorId(principal, staffId);
         long staffFilter = effectiveStaffId != null ? effectiveStaffId : -1L;
         String statusFilter = status != null ? status.trim() : "";
         LocalDate from = fromDate != null ? fromDate : LocalDate.of(1900, 1, 1);
@@ -185,8 +199,22 @@ public class DoctorScheduleLeaveService {
 
     @Transactional(readOnly = true)
     public List<LeaveConflictDto> getLeaveConflicts(UserPrincipal principal, Long staffId, Long leaveId) {
-        Long effectiveStaffId = "DOCTOR".equals(principal.getRole()) ? principal.getId() : staffId;
+        Long effectiveStaffId = resolveScopedDoctorId(principal, staffId);
         return leaveConflictService.findConflicts(effectiveStaffId, leaveId);
+    }
+
+    private Long resolveScopedDoctorId(UserPrincipal principal, Long requestedStaffId) {
+        if ("DOCTOR".equals(principal.getRole())) {
+            if (requestedStaffId != null && !requestedStaffId.equals(principal.getId())) {
+                throw new BusinessException(
+                        "ACCESS_DENIED_SCOPE",
+                        "Bác sĩ chỉ được xem dữ liệu lịch làm việc của chính mình.",
+                        HttpStatus.FORBIDDEN
+                );
+            }
+            return principal.getId();
+        }
+        return requestedStaffId;
     }
 
     private ScheduleDto toScheduleDto(DoctorSchedule s) {

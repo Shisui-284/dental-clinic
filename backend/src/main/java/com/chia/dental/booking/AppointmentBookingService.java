@@ -14,6 +14,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.*;
+import java.time.temporal.ChronoUnit;
 import java.util.*;
 
 @Service
@@ -278,11 +279,24 @@ public class AppointmentBookingService {
 
     @Transactional(readOnly = true)
     public List<AppointmentResponse> getStaffAppointments(
+            UserPrincipal principal,
             LocalDate date,
             String status,
             Long staffId,
             Long chairId,
             Boolean onlyLeaveConflict) {
+
+        Long effectiveStaffId = staffId;
+        if (principal != null && "DOCTOR".equals(principal.getRole())) {
+            if (staffId != null && !staffId.equals(principal.getId())) {
+                throw new BusinessException(
+                        "ACCESS_DENIED_SCOPE",
+                        "Bác sĩ chỉ được xem danh sách lịch hẹn thuộc về chính mình.",
+                        HttpStatus.FORBIDDEN
+                );
+            }
+            effectiveStaffId = principal.getId();
+        }
 
         OffsetDateTime startOfDay = date != null
                 ? date.atStartOfDay(CLINIC_ZONE).toOffsetDateTime()
@@ -291,7 +305,7 @@ public class AppointmentBookingService {
                 ? date.plusDays(1).atStartOfDay(CLINIC_ZONE).toOffsetDateTime()
                 : OffsetDateTime.of(2100, 1, 1, 0, 0, 0, 0, ZoneOffset.UTC);
         String statusFilter = status != null ? status.trim() : "";
-        long staffFilter = staffId != null ? staffId : -1L;
+        long staffFilter = effectiveStaffId != null ? effectiveStaffId : -1L;
         long chairFilter = chairId != null ? chairId : -1L;
         Set<Long> conflictIds = leaveConflictService.findConflictingAppointmentIds();
 
@@ -310,7 +324,7 @@ public class AppointmentBookingService {
      * Lễ tân tạo lịch tại quầy (Màn L2 — UC-06, FR-06, FR-14):
      * - PHONE / SOCIAL -> CONFIRMED ngay (bỏ qua Blacklist)
      * - WALK_IN -> CHECKED_IN ngay (actual_arrival_at = now), hỗ trợ dịch vụ tạm (is_temporary = true, service_id = null)
-     * - Hỗ trợ lịch cấp cứu ưu tiên (is_priority = true)
+     * - Hỗ trợ lịch cấp cứu ưu tiên (is_priority = true): tự tìm khung giờ trống gần nhất trong ngày nếu chưa chọn dateTime
      */
     @Transactional
     public AppointmentResponse createStaffAppointment(UserPrincipal principal, StaffCreateAppointmentRequest req) {
@@ -320,11 +334,6 @@ public class AppointmentBookingService {
 
         boolean isWalkIn = "WALK_IN".equals(req.getSource());
         boolean isPriority = Boolean.TRUE.equals(req.getIsPriority());
-
-        OffsetDateTime slotStart = req.getDateTime() != null ? req.getDateTime() : (isWalkIn ? now : null);
-        if (slotStart == null) {
-            throw new BusinessException("DATETIME_REQUIRED", "Vui lòng chọn ngày giờ hẹn.", HttpStatus.BAD_REQUEST);
-        }
 
         boolean hasOfficialServices = req.getServiceIds() != null && !req.getServiceIds().isEmpty();
         boolean hasTempService = req.getTemporaryService() != null;
@@ -362,6 +371,17 @@ public class AppointmentBookingService {
         int chairBuffer = clinicConfigService.getChairBufferMinutes();
         int newPatientBuffer = isNewPatient ? clinicConfigService.getNewPatientBufferMinutes() : 0;
         short totalDuration = (short) (serviceDuration + chairBuffer + newPatientBuffer);
+
+        OffsetDateTime slotStart;
+        if (req.getDateTime() != null) {
+            slotStart = req.getDateTime();
+        } else if (isPriority) {
+            slotStart = findEarliestAvailableSlotForPriority(req.getStaffId(), req.getChairId(), totalDuration, now);
+        } else if (isWalkIn) {
+            slotStart = now;
+        } else {
+            throw new BusinessException("DATETIME_REQUIRED", "Vui lòng chọn ngày giờ hẹn.", HttpStatus.BAD_REQUEST);
+        }
         OffsetDateTime slotEnd = slotStart.plusMinutes(totalDuration);
 
         // Với WALK_IN hoặc cấp cứu (is_priority = true) không ép buộc phải có doctor_schedule định sẵn
@@ -639,6 +659,14 @@ public class AppointmentBookingService {
         }
 
         OffsetDateTime now = OffsetDateTime.now(CLINIC_ZONE);
+        int lateMinutes = clinicConfigService.getLateNoshowMinutes();
+        if (now.isBefore(appt.getDateTime().plusMinutes(lateMinutes))) {
+            throw new BusinessException(
+                    "NO_SHOW_TOO_EARLY",
+                    "Chỉ có thể đánh dấu Không đến khi khách đã trễ ít nhất " + lateMinutes + " phút so với giờ hẹn.",
+                    HttpStatus.UNPROCESSABLE_ENTITY
+            );
+        }
         appt.setStatus("NO_SHOW");
         appt = appointmentRepository.saveAndFlush(appt);
 
@@ -922,6 +950,72 @@ public class AppointmentBookingService {
         throw new BusinessException("PATIENT_INFO_REQUIRED",
                 "Khách hàng chưa có hồ sơ bệnh nhân. Vui lòng cung cấp patientInfo (fullName, birthYear).",
                 HttpStatus.BAD_REQUEST);
+    }
+
+    private OffsetDateTime findEarliestAvailableSlotForPriority(
+            Long requestedStaffId,
+            Long requestedChairId,
+            short totalDuration,
+            OffsetDateTime now) {
+
+        LocalTime openTime = clinicConfigService.getClinicOpenTime();
+        LocalTime closeTime = clinicConfigService.getClinicCloseTime();
+        ZonedDateTime nowZoned = now.atZoneSameInstant(CLINIC_ZONE).truncatedTo(ChronoUnit.MINUTES);
+        int rem = nowZoned.getMinute() % 15;
+        ZonedDateTime roundedNow = rem == 0 ? nowZoned : nowZoned.plusMinutes(15 - rem);
+
+        // Tìm khung giờ trống gần nhất trong ngày hôm nay trước; nếu đã quá giờ đóng cửa thì tìm tiếp các ngày kế tiếp
+        for (int dayOffset = 0; dayOffset <= 3; dayOffset++) {
+            LocalDate date = nowZoned.toLocalDate().plusDays(dayOffset);
+            LocalTime startCandidate = dayOffset == 0
+                    ? (roundedNow.toLocalTime().isBefore(openTime) ? openTime : roundedNow.toLocalTime())
+                    : openTime;
+            LocalTime latestStart = closeTime.minusMinutes(totalDuration);
+            if (startCandidate.isAfter(latestStart)) {
+                continue;
+            }
+
+            OffsetDateTime dayStart = date.atStartOfDay(CLINIC_ZONE).toOffsetDateTime();
+            OffsetDateTime dayEnd = date.plusDays(1).atStartOfDay(CLINIC_ZONE).toOffsetDateTime();
+            List<Appointment> dayAppts = appointmentRepository.findActiveAppointmentsInRange(dayStart, dayEnd);
+            List<DentalChair> chairs = requestedChairId != null
+                    ? dentalChairRepository.findById(requestedChairId).filter(c -> "ACTIVE".equals(c.getStatus())).map(List::of).orElse(List.of())
+                    : dentalChairRepository.findByStatus("ACTIVE");
+            List<StaffAccount> doctors = requestedStaffId != null
+                    ? staffAccountRepository.findById(requestedStaffId)
+                            .filter(s -> Boolean.TRUE.equals(s.getStatus()) && "DOCTOR".equals(s.getRole().getRoleName()))
+                            .map(List::of).orElse(List.of())
+                    : staffAccountRepository.findByRoleRoleNameAndStatusTrue("DOCTOR");
+
+            LocalTime cursor = startCandidate;
+            while (!cursor.isAfter(latestStart)) {
+                OffsetDateTime slotStart = ZonedDateTime.of(date, cursor, CLINIC_ZONE).toOffsetDateTime();
+                OffsetDateTime slotEnd = slotStart.plusMinutes(totalDuration);
+                LocalTime slotStartLocal = cursor;
+                LocalTime slotEndLocal = cursor.plusMinutes(totalDuration);
+
+                boolean hasFreeChair = chairs.stream().anyMatch(c -> dayAppts.stream()
+                        .filter(a -> a.getChair().getChairId().equals(c.getChairId()))
+                        .noneMatch(a -> slotStart.isBefore(getEffectiveEndTime(a)) && slotEnd.isAfter(a.getDateTime())));
+
+                boolean hasFreeDoctor = doctors.stream()
+                        .filter(d -> !isDoctorOnLeave(d.getStaffId(), date, slotStartLocal, slotEndLocal))
+                        .anyMatch(d -> dayAppts.stream()
+                                .filter(a -> a.getStaff().getStaffId().equals(d.getStaffId()))
+                                .noneMatch(a -> slotStart.isBefore(getEffectiveEndTime(a)) && slotEnd.isAfter(a.getDateTime())));
+
+                if (hasFreeChair && hasFreeDoctor) {
+                    return slotStart;
+                }
+                cursor = cursor.plusMinutes(15);
+            }
+        }
+
+        throw new BusinessException(
+                "APPT_SLOT_CONFLICT",
+                "Không còn khung giờ trống khả dụng cho ca cấp cứu (không tự động hủy/dời lịch đã xác nhận của khách khác).",
+                HttpStatus.CONFLICT
+        );
     }
 
     private DoctorAssignment resolveDoctorForSlot(

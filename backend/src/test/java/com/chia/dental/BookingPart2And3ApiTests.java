@@ -236,8 +236,11 @@ class BookingPart2And3ApiTests {
         String managerToken = loginStaff("quanly01");
         OffsetDateTime now = OffsetDateTime.now(CLINIC_ZONE);
 
-        // 1. Tạo lịch CONFIRMED trong CÙNG NGÀY HÔM NAY để test NO_SHOW & hoàn tác trong ngày
-        OffsetDateTime todaySlot = ZonedDateTime.of(LocalDate.now(CLINIC_ZONE), LocalTime.of(10, 0), CLINIC_ZONE).toOffsetDateTime();
+        // 1. Tạo lịch CONFIRMED trong CÙNG NGÀY HÔM NAY (đã trễ quá 15 phút) để test NO_SHOW & hoàn tác trong ngày
+        ZonedDateTime nowZoned = now.atZoneSameInstant(CLINIC_ZONE);
+        OffsetDateTime todaySlot = nowZoned.toLocalTime().isAfter(LocalTime.of(0, 25))
+                ? now.minusMinutes(25)
+                : nowZoned.toLocalDate().atStartOfDay(CLINIC_ZONE).toOffsetDateTime();
         Appointment todayAppt = appointmentRepository.saveAndFlush(Appointment.builder()
                 .patient(patientProfileRepository.findById(8L).orElseThrow()) // customer 5
                 .staff(staffAccountRepository.findById(6L).orElseThrow())
@@ -251,6 +254,26 @@ class BookingPart2And3ApiTests {
                 .createdAt(now.minusHours(3))
                 .createdBy(staffAccountRepository.findById(2L).orElseThrow())
                 .build());
+
+        // Kiểm tra quy tắc 15 phút: lịch hẹn tương lai chưa trễ 15 phút -> 422 NO_SHOW_TOO_EARLY
+        Appointment futureAppt = appointmentRepository.saveAndFlush(Appointment.builder()
+                .patient(patientProfileRepository.findById(8L).orElseThrow())
+                .staff(staffAccountRepository.findById(6L).orElseThrow())
+                .chair(dentalChairRepository.findById(1L).orElseThrow())
+                .dateTime(now.plusHours(3))
+                .duration((short) 35)
+                .status("CONFIRMED")
+                .source("PHONE")
+                .bookedByPhone("0900000005")
+                .isPriority(false)
+                .createdAt(now.minusHours(1))
+                .createdBy(staffAccountRepository.findById(2L).orElseThrow())
+                .build());
+
+        mockMvc.perform(patch("/api/v1/staff/appointments/{id}/no-show", futureAppt.getAppointmentId())
+                        .header("Authorization", "Bearer " + receptionistToken))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.code").value("NO_SHOW_TOO_EARLY"));
 
         // Đánh dấu NO_SHOW -> tạo no_show_event
         mockMvc.perform(patch("/api/v1/staff/appointments/{id}/no-show", todayAppt.getAppointmentId())
@@ -428,5 +451,83 @@ class BookingPart2And3ApiTests {
                         .param("leaveId", String.valueOf(leaveId)))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data", hasSize(0)));
+    }
+
+    @Test
+    void testDoctorDataIsolation_EmergencyAutoSlot_Chairs_AndLogout() throws Exception {
+        String doctorToken = loginStaff("bacsi01");       // staff_id = 4
+        String receptionistToken = loginStaff("letan01"); // staff_id = 2
+
+        // 1. Bác sĩ xem /api/v1/staff/appointments -> CHỈ trả về lịch thuộc chính mình (doctorId == 4)
+        MvcResult docAppts = mockMvc.perform(get("/api/v1/staff/appointments")
+                        .header("Authorization", "Bearer " + doctorToken))
+                .andExpect(status().isOk())
+                .andReturn();
+        var items = objectMapper.readTree(docAppts.getResponse().getContentAsString()).path("data");
+        assertThat(items.isArray()).isTrue();
+        for (var node : items) {
+            assertThat(node.path("doctorId").asLong()).isEqualTo(4L);
+        }
+
+        // Bác sĩ cố lọc lịch của bác sĩ khác (staffId = 5) -> 403 ACCESS_DENIED_SCOPE
+        mockMvc.perform(get("/api/v1/staff/appointments")
+                        .header("Authorization", "Bearer " + doctorToken)
+                        .param("staffId", "5"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("ACCESS_DENIED_SCOPE"));
+
+        // Bác sĩ cố tạo lịch hộ -> 403 Forbidden
+        mockMvc.perform(post("/api/v1/staff/appointments")
+                        .header("Authorization", "Bearer " + doctorToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "source": "PHONE",
+                                  "phone": "0900000001",
+                                  "patientId": 1,
+                                  "serviceIds": [1],
+                                  "dateTime": "%s"
+                                }
+                                """.formatted(OffsetDateTime.now(CLINIC_ZONE).plusDays(2))))
+                .andExpect(status().isForbidden());
+
+        // 2. Lễ tân không được duyệt đơn nghỉ bác sĩ (chỉ MANAGER)
+        mockMvc.perform(patch("/api/v1/manager/leaves/1/approval")
+                        .header("Authorization", "Bearer " + receptionistToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"decision": "APPROVED"}
+                                """))
+                .andExpect(status().isForbidden());
+
+        // 3. Ca cấp cứu không truyền dateTime -> tự tìm khung giờ trống gần nhất
+        mockMvc.perform(post("/api/v1/staff/appointments")
+                        .header("Authorization", "Bearer " + receptionistToken)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "source": "PHONE",
+                                  "phone": "0900000001",
+                                  "patientId": 1,
+                                  "serviceIds": [1],
+                                  "isPriority": true,
+                                  "note": "Cấp cứu tự động chèn slot gần nhất"
+                                }
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.data.status").value("CONFIRMED"))
+                .andExpect(jsonPath("$.data.isPriority").value(true))
+                .andExpect(jsonPath("$.data.dateTime").isNotEmpty());
+
+        // 4. Danh mục ghế nha đang hoạt động
+        mockMvc.perform(get("/api/v1/staff/chairs")
+                        .header("Authorization", "Bearer " + receptionistToken))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data", hasSize(greaterThanOrEqualTo(1))));
+
+        // 5. Đăng xuất nhân sự -> 200 OK & ghi audit_log
+        mockMvc.perform(post("/api/v1/auth/staff/logout")
+                        .header("Authorization", "Bearer " + doctorToken))
+                .andExpect(status().isOk());
     }
 }

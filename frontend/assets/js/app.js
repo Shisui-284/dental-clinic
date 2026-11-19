@@ -5,6 +5,7 @@ import { session, hasStaffRole, setStaffLogout } from "./core/session.js";
 import { toast } from "./core/ui.js";
 import { config, updateConfig, isMock } from "./config.js";
 import { resetMockData } from "./core/mock.js";
+import { api } from "./api/index.js";
 
 import login from "./screens/login.js";
 import k1 from "./screens/k1.js";
@@ -17,9 +18,19 @@ import k7 from "./screens/k7.js";
 import l1 from "./screens/l1.js";
 import l2 from "./screens/l2.js";
 import l3 from "./screens/l3.js";
+import b1 from "./screens/b1.js";
+import q1 from "./screens/q1.js";
+import q2 from "./screens/q2.js";
 
-const SCREENS = { login, k1, k2, k3, k4, k5, k6, k7, l1, l2, l3 };
-const STAFF_SCREENS = new Set(["l1", "l2", "l3"]);
+const SCREENS = { login, k1, k2, k3, k4, k5, k6, k7, l1, l2, l3, b1, q1, q2 };
+const ROLE_GUARD = {
+  l1: ["RECEPTIONIST", "MANAGER"],
+  l2: ["RECEPTIONIST", "MANAGER"],
+  l3: ["RECEPTIONIST", "MANAGER"],
+  b1: ["DOCTOR", "MANAGER"],
+  q1: ["MANAGER"],
+  q2: ["MANAGER"],
+};
 
 const app = document.getElementById("app");
 let cleanup = null;
@@ -82,7 +93,14 @@ async function render() {
 
   document.body.dataset.screen = screenId;
 
-  if (STAFF_SCREENS.has(screenId) && !hasStaffRole("RECEPTIONIST", "MANAGER")) {
+  const allowedRoles = ROLE_GUARD[screenId];
+  if (allowedRoles && !hasStaffRole(...allowedRoles)) {
+    if (session.staff) {
+      toast("Tài khoản của bạn không có quyền truy cập màn hình này.", "err");
+      const fallback = session.staff.role === "DOCTOR" ? "b1" : "l1";
+      navigate(fallback);
+      return;
+    }
     const loginScreen = SCREENS.login;
     const lctx = { params, next: screenId, refresh: render };
     app.innerHTML = await loginScreen.render(lctx);
@@ -108,7 +126,12 @@ async function render() {
     const t = document.getElementById("topbar-title");
     if (t) t.textContent = screen.title || "";
     const lo = app.querySelector("[data-logout]");
-    if (lo) lo.onclick = () => { setStaffLogout(); toast("Đã đăng xuất."); navigate("k1"); };
+    if (lo) lo.onclick = async () => {
+      try { await api.staffLogout(); } catch { /* ignore */ }
+      setStaffLogout();
+      toast("Đã đăng xuất.");
+      navigate("login");
+    };
   } else {
     app.innerHTML = customerFrame({
       content: html,

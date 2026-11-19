@@ -32,7 +32,7 @@ export default {
       api.services(),
     ]);
 
-    const days = Array.from({ length: 14 }, (_, i) => {
+    const days = Array.from({ length: 30 }, (_, i) => {
       const x = new Date();
       x.setDate(x.getDate() + i);
       return { k: key(x), d: x };
@@ -72,7 +72,7 @@ export default {
           <div class="card">
             <div class="card-title">Tóm tắt</div>
             <div class="line"><span>Số dịch vụ</span><b>${d.serviceIds.length}</b></div>
-            <div class="line"><span>Thời lượng</span><b>${res.duration} phút</b></div>
+            <div class="line"><span>Thời lượng</span><b data-dur="${res.duration}">${res.duration} phút</b></div>
             <div class="line"><span class="small muted">Đã gồm đệm ghế</span></div>
             <div class="line"><span>Ngày</span><b>${esc(date.split("-").reverse().join("/"))}</b></div>
             <div class="line"><span>Giờ</span><b data-picked>${selected ? fmtTime(selected) : "Chưa chọn"}</b></div>
@@ -121,7 +121,9 @@ export default {
           toast("Đã cập nhật lịch hẹn. Vui lòng chờ lễ tân xác nhận lại.", "ok");
           navigate("k7");
         } else {
-          setDraft({ start: picked });
+          const durEl = root.querySelector("[data-dur]");
+          const durationHint = durEl ? Number(durEl.dataset.dur) || undefined : undefined;
+          setDraft({ start: picked, ...(durationHint ? { durationHint } : {}) });
           navigate("k5");
         }
       } catch (ex) {

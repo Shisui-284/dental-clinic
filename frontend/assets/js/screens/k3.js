@@ -87,13 +87,13 @@ export default {
         return t + Number(txt || 0);
       }, 0);
       lastPrice = totalPrice;
-      lastDur = totalDur ? totalDur + 10 : 0;
+      lastDur = totalDur ? totalDur + 5 : 0;
       const names = list.map((n) => n.querySelector(".name").textContent);
       root.querySelector("[data-summary]").innerHTML = `
         <div class="line"><span>Dịch vụ đã chọn</span><b>${list.length}</b></div>
         ${names.map((n) => `<div class="line"><span class="small">${esc(n)}</span></div>`).join("") || '<div class="small muted" style="padding:6px 0">Chưa chọn dịch vụ nào</div>'}
-        <div class="line"><span>Thời lượng dự kiến</span><b>${totalDur ? totalDur + 10 : 0} phút</b></div>
-        <div class="line"><span class="small muted">Đã gồm 5–10 phút vệ sinh ghế</span></div>
+        <div class="line"><span>Thời lượng dự kiến</span><b>${totalDur ? totalDur + 5 : 0} phút</b></div>
+        <div class="line"><span class="small muted">Đã gồm 5 phút vệ sinh ghế (+15 phút nếu hồ sơ mới)</span></div>
         <div class="line total"><span>Tạm tính</span><span>${money(totalPrice)}</span></div>`;
       if (totalDur > 120) {
         root.querySelector("[data-summary]").insertAdjacentHTML("beforeend",

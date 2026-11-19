@@ -346,14 +346,16 @@ const routes = [
   }],
 
   ["POST", /^\/api\/v1\/staff\/appointments$/, (m, body) => {
-    const { phone, patient, serviceIds, doctorId, start, source, isPriority, note } = body;
+    const { phone, patient, serviceIds, temporaryService, doctorId, start, source, isPriority, note } = body;
     if (!patient?.fullName) throw new ApiError(422, "PATIENT_REQUIRED", "Thiếu họ tên người khám.");
     if (!/^0\d{9}$/.test(String(phone || ""))) throw new ApiError(422, "PHONE_INVALID", "SĐT phải gồm 10 chữ số.");
-    if (!serviceIds?.length) throw new ApiError(422, "SERVICE_REQUIRED", "Chọn ít nhất 1 dịch vụ.");
-    if (!start) throw new ApiError(422, "TIME_REQUIRED", "Chưa chọn khung giờ.");
-    const dur = serviceIds.reduce((t, id) => t + ((svc(id) || {}).duration || 0), 0) + 10 + (patient.isNew ? 15 : 0);
+    if (!serviceIds?.length && !temporaryService) throw new ApiError(422, "SERVICE_REQUIRED", "Chọn ít nhất 1 dịch vụ hoặc dịch vụ tạm.");
+    const effectiveStart = start || new Date().toISOString();
+    const officialDur = (serviceIds || []).reduce((t, id) => t + ((svc(id) || {}).duration || 0), 0);
+    const tempDur = temporaryService ? (Number(temporaryService.durationMinutes) || 30) : 0;
+    const dur = officialDur + tempDur + 5 + (patient.isNew ? 15 : 0);
     const doc = doctorId || DOCTORS.find((d) => d.active).id;
-    const chair = CHAIRS.find((c) => !conflicts(start, dur, doc, c));
+    const chair = CHAIRS.find((c) => !conflicts(effectiveStart, dur, doc, c)) || CHAIRS[0];
     if (!chair) throw new ApiError(409, "SLOT_TAKEN", "Khung giờ đã kín. Chọn khung khác.");
     db.seq += 1;
     const status = source === "WALK_IN" ? "CHECKED_IN" : "CONFIRMED";
@@ -362,16 +364,17 @@ const routes = [
       code: `LH-2026-${String(db.seq).padStart(6, "0")}`,
       patientName: patient.fullName,
       phone,
-      serviceIds,
+      serviceIds: serviceIds || [],
+      temporaryService: temporaryService || null,
       doctorId: doc,
       chairId: chair,
-      start,
+      start: effectiveStart,
       duration: dur,
       status,
       source: source || "RECEPTION",
       isPriority: !!isPriority,
       holdUntil: null,
-      note: note || "",
+      note: note || (temporaryService?.description ? `[Dịch vụ tạm: ${temporaryService.description}]` : ""),
       cancelReason: null,
       createdAt: new Date().toISOString(),
     };
@@ -447,10 +450,108 @@ const routes = [
     return publicAppt(a);
   }],
 
+  ["POST", /^\/api\/v1\/auth\/staff\/logout$/, () => ({ ok: true })],
+
+  ["GET", /^\/api\/v1\/staff\/chairs$/, () => CHAIRS.map((c) => ({ id: c, name: `Ghế ${c}`, status: "ACTIVE" }))],
+
   ["GET", /^\/api\/v1\/staff\/schedules$/, (m, body, q) => {
     const date = q.get("date");
-    const leaves = DOCTORS.flatMap((d) => d.leave.filter((l) => l.date === date).map((l) => ({ doctorId: d.id, doctorName: d.name, ...l })));
+    const leaves = (db.leaves || [])
+      .filter((l) => l.status === "APPROVED" && (!date || l.leaveDate === date))
+      .map((l) => ({ doctorId: l.staffId, doctorName: l.doctorName, date: l.leaveDate, start: l.startTime, end: l.endTime, reason: l.reason }));
     return { date, leaves };
+  }],
+
+  ["GET", /^\/api\/v1\/staff\/doctor-schedules$/, () => {
+    const today = dateKey(new Date());
+    const tomorrow = dateKey(new Date(Date.now() + DAY));
+    return [
+      { id: "SCH1", staffId: "D01", doctorName: "BS. Trần Minh", shiftDate: today, startTime: "08:00", endTime: "17:30", status: "ACTIVE" },
+      { id: "SCH2", staffId: "D01", doctorName: "BS. Trần Minh", shiftDate: tomorrow, startTime: "08:00", endTime: "17:30", status: "ACTIVE" },
+    ];
+  }],
+
+  ["POST", /^\/api\/v1\/doctor\/leaves$/, (m, body) => {
+    db.leaves = db.leaves || [];
+    const lv = {
+      id: "LV" + Date.now(),
+      staffId: body.staffId || "D01",
+      doctorName: (DOCTORS.find((d) => d.id === (body.staffId || "D01")) || DOCTORS[0]).name,
+      leaveDate: body.leaveDate,
+      startTime: String(body.startTime || "08:00").slice(0, 5),
+      endTime: String(body.endTime || "12:00").slice(0, 5),
+      reason: body.reason || "Nghỉ đột xuất",
+      status: "PENDING",
+      approvedByName: null,
+    };
+    db.leaves.unshift(lv);
+    save(db);
+    return lv;
+  }],
+
+  ["GET", /^\/api\/v1\/staff\/leaves$/, (m, body, q) => {
+    db.leaves = db.leaves || [];
+    const st = q.get("status");
+    return db.leaves.filter((l) => (!st ? true : l.status === st));
+  }],
+
+  ["PATCH", /^\/api\/v1\/manager\/leaves\/([^/]+)\/approval$/, (m, body) => {
+    db.leaves = db.leaves || [];
+    const lv = db.leaves.find((l) => l.id === m[1]);
+    if (!lv) throw new ApiError(404, "NOT_FOUND", "Không tìm thấy đơn nghỉ.");
+    lv.status = body.decision;
+    lv.approvedByName = "Phạm Quốc Bảo";
+    save(db);
+    const affected = lv.status === "APPROVED"
+      ? db.appointments.filter((a) => a.status === "CONFIRMED" && a.doctorId === lv.staffId && dateKey(a.start) === lv.leaveDate)
+      : [];
+    return { leave: lv, conflictCount: affected.length, affectedAppointments: affected };
+  }],
+
+  ["GET", /^\/api\/v1\/staff\/appointments\/leave-conflicts$/, () => {
+    const approved = (db.leaves || []).filter((l) => l.status === "APPROVED");
+    const out = [];
+    for (const lv of approved) {
+      for (const a of db.appointments) {
+        if (a.status === "CONFIRMED" && a.doctorId === lv.staffId && dateKey(a.start) === lv.leaveDate) {
+          out.push({
+            appointmentId: a.id,
+            appointmentCode: a.code,
+            patientName: a.patientName,
+            phone: a.phone,
+            doctorName: lv.doctorName,
+            dateTime: a.start,
+            leaveId: lv.id,
+            leaveDate: lv.leaveDate,
+            leaveStartTime: lv.startTime,
+            leaveEndTime: lv.endTime,
+            leaveReason: lv.reason,
+          });
+        }
+      }
+    }
+    return out;
+  }],
+
+  ["GET", /^\/api\/v1\/manager\/blacklist$/, () => (db.blacklist || []).map((phone, i) => ({
+    customerId: String(100 + i),
+    phone,
+    patientNames: ["Khách vi phạm (Mock)"],
+    activeNoShowCount: 3,
+    threshold: 3,
+    windowMonths: 12,
+    stillExceedsThreshold: true,
+    isBlacklisted: true,
+  }))],
+
+  ["POST", /^\/api\/v1\/manager\/blacklist\/([^/]+)\/unlock$/, (m, body) => {
+    if (!body.reason) throw new ApiError(422, "REASON_REQUIRED", "Bắt buộc nhập lý do mở khóa.");
+    const idx = Number(m[1]) - 100;
+    if (idx >= 0 && idx < (db.blacklist || []).length) {
+      db.blacklist.splice(idx, 1);
+      save(db);
+    }
+    return { isBlacklisted: false, warning: "Đã mở khóa đặc cách trong chế độ Mock." };
   }],
 ];
 

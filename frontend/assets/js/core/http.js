@@ -27,10 +27,15 @@ function buildUrl(path, query) {
 function authToken(path, override) {
   if (override === "staff") return session.staff?.token || null;
   if (override === "customer") return session.customer?.token || null;
-  if (path.startsWith("/api/v1/customer/") || path.startsWith("/api/v1/doctor/")) {
+  if (path.startsWith("/api/v1/customer/")) {
     return session.customer?.token || null;
   }
-  if (path.startsWith("/api/v1/staff/") || path.startsWith("/api/v1/manager/")) {
+  if (
+    path.startsWith("/api/v1/staff/") ||
+    path.startsWith("/api/v1/manager/") ||
+    path.startsWith("/api/v1/doctor/") ||
+    path.startsWith("/api/v1/auth/staff/logout")
+  ) {
     return session.staff?.token || null;
   }
   return null;
